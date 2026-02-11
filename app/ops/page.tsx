@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { AlertCircle, UploadCloud, FileSpreadsheet, Save, CheckCircle } from 'lucide-react'
+import { AlertCircle, UploadCloud, FileSpreadsheet, Save, CheckCircle, Plus, Trash2 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 
 type LocationData = {
@@ -16,13 +16,23 @@ type LocationData = {
   locations: { name: string; id: string; company_id: string }
 }
 
-const VAT_RATE = 0.08 // 8% VAT – change to 0.23 if you want
+type Employee = {
+  id: string
+  full_name: string
+  real_hour_cost: number | null
+}
+
+type EmployeeRow = {
+  employee_id: string
+  hours: string
+}
+
+const VAT_RATE = 0.08 // 8% VAT – adjust if needed
 
 export default function OpsDashboard() {
   const supabase = createClient()
   const router = useRouter()
 
-  // --- STAN ---
   const [loading, setLoading] = useState(true)
   const [myLocations, setMyLocations] = useState<LocationData[]>([])
   const [selectedLocation, setSelectedLocation] = useState<LocationData | null>(null)
@@ -30,6 +40,12 @@ export default function OpsDashboard() {
   const [activeView, setActiveView] = useState<'reporting' | 'invoices'>('reporting')
 
   const [reportDate, setReportDate] = useState('')
+
+  const [employees, setEmployees] = useState<Employee[]>([])
+  const [employeeRows, setEmployeeRows] = useState<EmployeeRow[]>([
+    { employee_id: '', hours: '' },
+  ])
+
   const [salesForm, setSalesForm] = useState({
     transactions: '',
     gross: '',
@@ -38,17 +54,21 @@ export default function OpsDashboard() {
     comments: '',
     targetGross: '',
     targetTx: '',
-    totalHours: '',
-    hourlyRate: '',
-    // new fields
+    // aggregated (kept for DB compatibility, not entered manually)
+    totalHoursAgg: '',
+    avgRateAgg: '',
+    // cash control
     cashReported: '',
     cashPhysical: '',
+    // daily ops costs
     pettyExpense: '',
     losses: '',
     refunds: '',
+    // incidents
     incidentType: '',
     incidentDetails: '',
   })
+
   const [error, setError] = useState<string | null>(null)
   const [isReadOnly, setIsReadOnly] = useState(false)
   const [existingReportId, setExistingReportId] = useState<string | null>(null)
@@ -58,7 +78,7 @@ export default function OpsDashboard() {
   const [uploading, setUploading] = useState(false)
   const [excelLoading, setExcelLoading] = useState(false)
 
-  // --- INICJALIZACJA ---
+  // ---------- INIT ----------
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0]
     setReportDate(today)
@@ -104,11 +124,12 @@ export default function OpsDashboard() {
     init()
   }, [router, supabase])
 
-  // --- POBIERANIE RAPORTU Z DB ---
+  // ---------- LOAD SALES + EMPLOYEES + HOURS ----------
   useEffect(() => {
     if (!selectedLocation || !reportDate || activeView !== 'reporting') return
 
-    const fetchReport = async () => {
+    const fetchAll = async () => {
+      // 1) sales_daily
       const { data } = await supabase
         .from('sales_daily')
         .select('*')
@@ -117,16 +138,17 @@ export default function OpsDashboard() {
         .single()
 
       if (data) {
-        setSalesForm({
+        setSalesForm(prev => ({
+          ...prev,
           transactions: data.transaction_count,
           gross: data.gross_revenue,
-          card: data.card_payments || 0,
-          cash: data.cash_payments || 0,
+          card: data.card_payments || '',
+          cash: data.cash_payments || '',
           comments: data.comments || '',
           targetGross: data.target_gross_sales || '',
           targetTx: data.target_transactions || '',
-          totalHours: data.total_labor_hours || '',
-          hourlyRate: data.avg_hourly_rate || '',
+          totalHoursAgg: data.total_labor_hours || '',
+          avgRateAgg: data.avg_hourly_rate || '',
           cashReported: data.cash_reported || '',
           cashPhysical: data.cash_physical || '',
           pettyExpense: data.petty_expenses || '',
@@ -134,10 +156,11 @@ export default function OpsDashboard() {
           refunds: data.daily_refunds || '',
           incidentType: data.incident_type || '',
           incidentDetails: data.incident_details || '',
-        })
+        }))
         setExistingReportId(data.id)
       } else {
-        setSalesForm({
+        setSalesForm(prev => ({
+          ...prev,
           transactions: '',
           gross: '',
           card: '',
@@ -145,8 +168,8 @@ export default function OpsDashboard() {
           comments: '',
           targetGross: '',
           targetTx: '',
-          totalHours: '',
-          hourlyRate: '',
+          totalHoursAgg: '',
+          avgRateAgg: '',
           cashReported: '',
           cashPhysical: '',
           pettyExpense: '',
@@ -154,21 +177,57 @@ export default function OpsDashboard() {
           refunds: '',
           incidentType: '',
           incidentDetails: '',
-        })
+        }))
         setExistingReportId(null)
+      }
+
+      // 2) employees for this location
+      const { data: emps } = await supabase
+        .from('employees')
+        .select('id, full_name, real_hour_cost, status')
+        .eq('location_id', selectedLocation.location_id)
+
+      if (emps) {
+        // filter only active
+        const active = emps.filter((e: any) => e.status !== 'nieaktywny')
+        setEmployees(
+          active.map((e: any) => ({
+            id: e.id,
+            full_name: e.full_name,
+            real_hour_cost: e.real_hour_cost,
+          })),
+        )
+      } else {
+        setEmployees([])
+      }
+
+      // 3) existing employee_daily_hours rows
+      const { data: hoursRows } = await supabase
+        .from('employee_daily_hours')
+        .select('employee_id, hours')
+        .eq('location_id', selectedLocation.location_id)
+        .eq('date', reportDate)
+
+      if (hoursRows && hoursRows.length > 0) {
+        setEmployeeRows(
+          hoursRows.map((r: any) => ({
+            employee_id: r.employee_id,
+            hours: String(r.hours),
+          })),
+        )
+      } else {
+        setEmployeeRows([{ employee_id: '', hours: '' }])
       }
     }
 
-    fetchReport()
+    fetchAll()
   }, [selectedLocation, reportDate, activeView, supabase])
 
-  // --- OBLICZENIA KPI ---
+  // ---------- DERIVED KPI ----------
   const gross = Number(salesForm.gross) || 0
   const tx = Number(salesForm.transactions) || 0
   const card = Number(salesForm.card) || 0
   const cash = Number(salesForm.cash) || 0
-  const hours = Number(salesForm.totalHours) || 0
-  const rate = Number(salesForm.hourlyRate) || 0
   const planGross = Number(salesForm.targetGross) || 0
   const planTx = Number(salesForm.targetTx) || 0
 
@@ -191,14 +250,40 @@ export default function OpsDashboard() {
   const cardPercent = gross > 0 ? card / gross : 0
   const cashPercent = gross > 0 ? cash / gross : 0
 
-  const laborCost = hours * rate
+  // EMPLOYEE AGGREGATE
+  const employeeTotals = employeeRows.reduce(
+    (acc, row) => {
+      const h = Number(row.hours) || 0
+      if (!row.employee_id || h <= 0) return acc
+      const emp = employees.find(e => e.id === row.employee_id)
+      const rate = emp?.real_hour_cost || 0
+      acc.totalHours += h
+      acc.totalCost += h * rate
+      return acc
+    },
+    { totalHours: 0, totalCost: 0 },
+  )
+
+  // fallback to aggregated old fields if no employee data
+  const hoursAgg = Number(salesForm.totalHoursAgg) || 0
+  const rateAgg = Number(salesForm.avgRateAgg) || 0
+  const manualCost = hoursAgg * rateAgg
+
+  const totalHours =
+    employeeTotals.totalHours > 0 ? employeeTotals.totalHours : hoursAgg
+  const laborCost =
+    employeeTotals.totalCost > 0 ? employeeTotals.totalCost : manualCost
+
   const laborPercent = net > 0 ? laborCost / net : 0
-  const salesPerHour = hours > 0 ? net / hours : 0
+  const salesPerHour = totalHours > 0 ? net / totalHours : 0
   const laborPerTx = tx > 0 ? laborCost / tx : 0
+  const effectiveHourlyRate =
+    totalHours > 0 ? laborCost / totalHours : 0
 
   const planTxRealisation = planTx > 0 ? tx / planTx : 0
 
-  const formatMoney = (v: number) =>
+  // ----- formatting helpers -----
+  const formatMoney0 = (v: number) =>
     new Intl.NumberFormat('pl-PL', {
       style: 'currency',
       currency: 'PLN',
@@ -215,7 +300,7 @@ export default function OpsDashboard() {
   const formatPercent = (v: number) =>
     (v * 100).toFixed(1).replace('.', ',') + '%'
 
-  // --- ZAPIS RAPORTU ---
+  // ---------- SAVE ----------
   const handleReportSubmit = async () => {
     if (isReadOnly || !selectedLocation) return
 
@@ -236,6 +321,12 @@ export default function OpsDashboard() {
       return
     }
 
+    // aggregated from employees (or fallback)
+    const totalHoursForDb = totalHours
+    const avgRateForDb =
+      totalHoursForDb > 0 ? laborCost / totalHoursForDb : 0
+
+    // 1) Save in sales_daily
     const payload: any = {
       location_id: selectedLocation.location_id,
       company_id: selectedLocation.locations.company_id,
@@ -247,8 +338,8 @@ export default function OpsDashboard() {
       comments: salesForm.comments,
       target_gross_sales: planGross,
       target_transactions: planTx,
-      total_labor_hours: hours,
-      avg_hourly_rate: rate,
+      total_labor_hours: totalHoursForDb,
+      avg_hourly_rate: avgRateForDb,
       status: 'submitted',
       cash_reported: cashReported,
       cash_physical: cashPhysical,
@@ -267,13 +358,49 @@ export default function OpsDashboard() {
     const { error } = await query
     if (error) {
       alert('Błąd zapisu: ' + error.message)
-    } else {
-      alert('✅ Raport dzienny zapisany')
-      setError(null)
+      return
     }
+
+    // 2) Upsert employee_daily_hours: delete old entries for date+location, then insert new
+    const validRows = employeeRows.filter(
+      r => r.employee_id && Number(r.hours) > 0,
+    )
+
+    await supabase
+      .from('employee_daily_hours')
+      .delete()
+      .eq('location_id', selectedLocation.location_id)
+      .eq('date', reportDate)
+
+    if (validRows.length > 0) {
+      const rowsToInsert = validRows.map(row => {
+        const h = Number(row.hours) || 0
+        const emp = employees.find(e => e.id === row.employee_id)
+        const rate = emp?.real_hour_cost || 0
+        return {
+          date: reportDate,
+          location_id: selectedLocation.location_id,
+          employee_id: row.employee_id,
+          hours: h,
+          hour_cost: rate,
+          daily_cost: h * rate,
+        }
+      })
+      const { error: hoursErr } = await supabase
+        .from('employee_daily_hours')
+        .insert(rowsToInsert)
+
+      if (hoursErr) {
+        alert('Raport zapisany, ale błąd zapisu godzin pracowników: ' + hoursErr.message)
+        return
+      }
+    }
+
+    alert('✅ Raport dzienny zapisany')
+    setError(null)
   }
 
-  // --- ZAPIS FAKTURY RĘCZNEJ ---
+  // ---------- INVOICE ----------
   const handleInvoiceSubmit = async () => {
     if (!selectedLocation) return
     if (!invoiceForm.supplier || !invoiceForm.amount) {
@@ -322,7 +449,7 @@ export default function OpsDashboard() {
     setUploading(false)
   }
 
-  // --- IMPORT EXCEL ---
+  // ---------- EXCEL IMPORT ----------
   const handleExcelUpload = async (e: any) => {
     if (!selectedLocation) return
     const file = e.target.files[0]
@@ -394,8 +521,24 @@ export default function OpsDashboard() {
     reader.readAsBinaryString(file)
   }
 
-  // --- RENDER ---
+  // ---------- EMPLOYEE ROW HANDLERS ----------
+  const addEmployeeRow = () => {
+    setEmployeeRows(prev => [...prev, { employee_id: '', hours: '' }])
+  }
 
+  const removeEmployeeRow = (index: number) => {
+    setEmployeeRows(prev => (prev.length > 1 ? prev.filter((_, i) => i !== index) : prev))
+  }
+
+  const updateEmployeeRow = (index: number, field: 'employee_id' | 'hours', value: string) => {
+    setEmployeeRows(prev => {
+      const copy = [...prev]
+      copy[index] = { ...copy[index], [field]: value }
+      return copy
+    })
+  }
+
+  // ---------- RENDER ----------
   if (loading) return <div className="p-8 text-center text-gray-500">Ładowanie…</div>
 
   if (!selectedLocation) {
@@ -438,14 +581,14 @@ export default function OpsDashboard() {
       : 'text-red-700'
 
   const cashDiffColor =
-    cashDiff === 0 ? 'text-green-700' : 'text-red-700'
+    Math.abs(cashDiff) < 0.01 ? 'text-green-700' : 'text-red-700'
 
   return (
     <div className="flex min-h-screen bg-gray-50 font-sans">
       <OpsSidebar
         locationName={selectedLocation.locations.name}
         activeView={activeView}
-        onNavigate={(view: string) => setActiveView(view as 'reporting' | 'invoices')}
+        onNavigate={setActiveView}
         onLogout={async () => {
           await supabase.auth.signOut()
           router.push('/login')
@@ -460,8 +603,8 @@ export default function OpsDashboard() {
             <header className="mb-8">
               <h1 className="text-3xl font-bold text-gray-900">Raport dzienny</h1>
               <p className="text-gray-500 mt-2">
-                Sprzedaż → Plan vs wykonanie → Koszt pracy → KPI dnia → Gotówka → Koszty
-                operacyjne → Zdarzenia.
+                Sprzedaż → Plan vs wykonanie → Godziny pracowników → KPI dnia → Gotówka →
+                Koszty operacyjne → Zdarzenia.
               </p>
             </header>
 
@@ -562,15 +705,15 @@ export default function OpsDashboard() {
                   <div>
                     <p className="text-xs text-slate-500 uppercase">Utarg netto</p>
                     <p className="text-xl font-bold text-slate-900">
-                      {formatMoney(net)}
+                      {formatMoney0(net)}
                     </p>
                     <p className="text-xs text-slate-500 mt-1">
                       Utarg brutto:{' '}
-                      <span className="font-medium">{formatMoney(gross)}</span>
+                      <span className="font-medium">{formatMoney0(gross)}</span>
                     </p>
                     <p className="text-xs text-slate-500">
                       VAT:{' '}
-                      <span className="font-medium">{formatMoney(vat)}</span>
+                      <span className="font-medium">{formatMoney0(vat)}</span>
                     </p>
                   </div>
 
@@ -653,9 +796,9 @@ export default function OpsDashboard() {
                       Sprzedaż netto vs plan
                     </p>
                     <p className="text-xl font-bold text-slate-900">
-                      {formatMoney(net)}{' '}
+                      {formatMoney0(net)}{' '}
                       <span className="text-xs text-slate-500 font-normal">
-                        / plan {formatMoney(planNet)}
+                        / plan {formatMoney0(planNet)}
                       </span>
                     </p>
                     <p className="text-xs text-slate-500 mt-1">
@@ -667,7 +810,7 @@ export default function OpsDashboard() {
                     <p className="text-xs text-slate-500">
                       Odchylenie kwotowe:{' '}
                       <span className="font-medium">
-                        {formatMoney(planDeviation)}
+                        {formatMoney0(planDeviation)}
                       </span>
                     </p>
                   </div>
@@ -694,81 +837,126 @@ export default function OpsDashboard() {
                 </CardContent>
               </Card>
 
-              {/* 3) KOSZT PRACY */}
+              {/* 3) GODZINY PRACOWNIKÓW */}
               <h3 className="font-bold text-lg text-gray-900 mb-4 border-b pb-2">
-                Koszt pracy
+                Godziny pracowników
               </h3>
 
-              <div className="grid grid-cols-2 gap-x-12 gap-y-6 mb-4 bg-blue-50 p-6 rounded border border-blue-100">
-                <div className="space-y-2">
-                  <Label>Łączna liczba godzin</Label>
-                  <Input
-                    type="number"
-                    placeholder="np. 45"
-                    value={salesForm.totalHours}
-                    onChange={e =>
-                      setSalesForm({ ...salesForm, totalHours: e.target.value })
-                    }
-                    disabled={isReadOnly}
-                    className="bg-white h-12 text-lg"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Średni koszt godziny (pracodawcy)</Label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-3 text-gray-400">zł</span>
-                    <Input
-                      type="number"
-                      placeholder="np. 25,00"
-                      value={salesForm.hourlyRate}
-                      onChange={e =>
-                        setSalesForm({ ...salesForm, hourlyRate: e.target.value })
-                      }
-                      disabled={isReadOnly}
-                      className="bg-white h-12 text-lg pl-8"
-                    />
-                  </div>
-                </div>
-              </div>
+              {employees.length === 0 && (
+                <p className="text-xs text-red-600 mb-2">
+                  Brak pracowników przypisanych do tego punktu. Dodaj pracowników w tabeli
+                  <b> employees </b> w Supabase, aby sekcja działała poprawnie.
+                </p>
+              )}
 
-              <Card className="mb-8">
+              <Card className="mb-6">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-semibold text-slate-600">
-                    Podsumowanie kosztu pracy
+                    Zestawienie godzin i kosztów
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <p className="text-xs text-slate-500 uppercase">
-                      Koszt pracy (PLN)
-                    </p>
-                    <p className={`text-xl font-bold ${kpiColorLabor}`}>
-                      {formatMoney(laborCost)}
-                    </p>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Koszt pracy % sprzedaży netto:{' '}
-                      <span className="font-bold">
-                        {net > 0 ? formatPercent(laborPercent) : '0,0%'}
-                      </span>
-                    </p>
+                <CardContent className="space-y-3">
+                  <div className="grid grid-cols-12 gap-2 text-xs font-semibold text-slate-500 border-b pb-2">
+                    <div className="col-span-5">Pracownik</div>
+                    <div className="col-span-2 text-right">Godziny</div>
+                    <div className="col-span-2 text-right">Koszt godziny</div>
+                    <div className="col-span-2 text-right">Koszt dnia</div>
+                    <div className="col-span-1" />
                   </div>
 
-                  <div>
-                    <p className="text-xs text-slate-500 uppercase">
-                      Produktywność
-                    </p>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Sprzedaż / roboczogodzina:{' '}
-                      <span className="font-bold">
-                        {formatMoney2(salesPerHour)}
+                  {employeeRows.map((row, i) => {
+                    const emp = employees.find(e => e.id === row.employee_id)
+                    const h = Number(row.hours) || 0
+                    const rate = emp?.real_hour_cost || 0
+                    const cost = h * rate
+                    return (
+                      <div
+                        key={i}
+                        className="grid grid-cols-12 gap-2 items-center text-sm"
+                      >
+                        <div className="col-span-5">
+                          <select
+                            value={row.employee_id}
+                            onChange={e =>
+                              updateEmployeeRow(i, 'employee_id', e.target.value)
+                            }
+                            disabled={isReadOnly || employees.length === 0}
+                            className="flex h-9 w-full rounded-md border border-input bg-background px-2 py-1 text-sm"
+                          >
+                            <option value="">– wybierz pracownika –</option>
+                            {employees.map(emp => (
+                              <option key={emp.id} value={emp.id}>
+                                {emp.full_name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="col-span-2">
+                          <Input
+                            type="number"
+                            value={row.hours}
+                            onChange={e =>
+                              updateEmployeeRow(i, 'hours', e.target.value)
+                            }
+                            disabled={isReadOnly}
+                            className="h-9 text-right"
+                          />
+                        </div>
+                        <div className="col-span-2 text-right text-slate-500">
+                          {rate ? formatMoney2(rate) : '0,00 zł'}
+                        </div>
+                        <div className="col-span-2 text-right font-medium">
+                          {cost ? formatMoney2(cost) : '0,00 zł'}
+                        </div>
+                        <div className="col-span-1 flex justify-end">
+                          {!isReadOnly && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => removeEmployeeRow(i)}
+                              className="h-8 w-8 text-slate-400 hover:text-red-600"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+
+                  {!isReadOnly && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={addEmployeeRow}
+                      className="mt-2 flex items-center gap-2"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Dodaj pracownika
+                    </Button>
+                  )}
+
+                  <div className="mt-4 border-t pt-3 text-xs text-slate-500 flex justify-between">
+                    <span>
+                      Suma godzin:{' '}
+                      <span className="font-semibold">
+                        {totalHours.toFixed(1)} h
                       </span>
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      Koszt pracy / transakcję:{' '}
-                      <span className="font-bold">
-                        {tx > 0 ? formatMoney2(laborPerTx) : '0,00 zł'}
+                    </span>
+                    <span>
+                      Całkowity koszt pracy:{' '}
+                      <span className="font-semibold">
+                        {formatMoney2(laborCost)}
                       </span>
-                    </p>
+                    </span>
+                    <span>
+                      Średni koszt godziny:{' '}
+                      <span className="font-semibold">
+                        {formatMoney2(effectiveHourlyRate)}
+                      </span>
+                    </span>
                   </div>
                 </CardContent>
               </Card>
@@ -777,7 +965,6 @@ export default function OpsDashboard() {
               <h3 className="font-bold text-lg text-gray-900 mb-4 border-b pb-2">
                 KPI dnia – podsumowanie
               </h3>
-
               <Card className="mb-8">
                 <CardContent className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm pt-6">
                   <div>
@@ -785,7 +972,7 @@ export default function OpsDashboard() {
                       Sprzedaż netto
                     </p>
                     <p className="text-lg font-bold text-slate-900">
-                      {formatMoney(net)}
+                      {formatMoney0(net)}
                     </p>
                   </div>
                   <div>
@@ -833,7 +1020,6 @@ export default function OpsDashboard() {
               <h3 className="font-bold text-lg text-gray-900 mb-4 border-b pb-2">
                 Kontrola gotówki
               </h3>
-
               <Card className="mb-8">
                 <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 text-sm">
                   <div className="space-y-2">
@@ -880,7 +1066,6 @@ export default function OpsDashboard() {
               <h3 className="font-bold text-lg text-gray-900 mb-4 border-b pb-2">
                 Koszty operacyjne dnia
               </h3>
-
               <Card className="mb-8">
                 <CardContent className="grid grid-cols-1 md:grid-cols-4 gap-4 pt-4 text-sm">
                   <div className="space-y-2">
@@ -935,7 +1120,6 @@ export default function OpsDashboard() {
               <h3 className="font-bold text-lg text-gray-900 mb-4 border-b pb-2">
                 Zdarzenia dnia
               </h3>
-
               <Card className="mb-8">
                 <CardContent className="space-y-4 pt-4 text-sm">
                   <div className="space-y-2">
@@ -977,7 +1161,7 @@ export default function OpsDashboard() {
                 </CardContent>
               </Card>
 
-              {/* Błąd / Zapis */}
+              {/* ERROR + SAVE BUTTON */}
               {error && (
                 <div className="mt-4 bg-red-50 border border-red-200 text-red-700 p-4 rounded flex items-center gap-2">
                   <AlertCircle className="w-5 h-5" />
