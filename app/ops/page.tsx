@@ -445,7 +445,7 @@ export default function OpsDashboard() {
       <OpsSidebar
         locationName={selectedLocation.locations.name}
         activeView={activeView}
-        onNavigate={setActiveView}
+        onNavigate={(view: string) => setActiveView(view as 'reporting' | 'invoices')}
         onLogout={async () => {
           await supabase.auth.signOut()
           router.push('/login')

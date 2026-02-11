@@ -9,15 +9,15 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Calendar, Filter, MapPin, AlertTriangle, CheckCircle } from 'lucide-react'
 
-// ====== CONSTANTS (ADJUSTABLE) ======
-const VAT_RATE = 0.08                // 8% VAT – change to 0.23 if needed
-const LABOR_PLAN_PERCENT = 0.25      // 25% koszt pracy do sprzedaży netto (plan)
-const LABOR_GREEN_MAX = 0.27         // < 27% - OK
-const LABOR_YELLOW_MAX = 0.30        // 27–30% - ostrzeżenie
-const GROSS_MARGIN_PLAN_PERCENT = 0.63 // 63% plan marży brutto netto
+// === CONSTANTS (you can tune these) ===
+const VAT_RATE = 0.08                 // for net = gross / (1 + VAT)
+const LABOR_PLAN_PERCENT = 0.25       // target labor cost % of net sales
+const LABOR_GREEN_MAX = 0.27          // <27% OK
+const LABOR_YELLOW_MAX = 0.30         // 27–30% warning
+const GROSS_MARGIN_PLAN_PERCENT = 0.63 // 63% target gross margin
 
-// ====== HELPERS ======
-const formatMoney = (amount: number) =>
+// === HELPERS ===
+const formatMoney0 = (amount: number) =>
   new Intl.NumberFormat('pl-PL', {
     style: 'currency',
     currency: 'PLN',
@@ -69,6 +69,11 @@ export default function AdminDashboard() {
     grossMarginPercent: 0,
     operatingProfit: 0,
     netMargin: 0,
+    // new sums from daily report
+    cashDiffTotal: 0,
+    pettySum: 0,
+    lossesSum: 0,
+    refundsSum: 0,
   })
 
   const [alerts, setAlerts] = useState<string[]>([])
@@ -78,7 +83,7 @@ export default function AdminDashboard() {
   const [importedCosts, setImportedCosts] = useState<any[]>([])
   const [historyInvoices, setHistoryInvoices] = useState<any[]>([])
 
-  // ====== INIT: date + locations ======
+  // === INITIALIZATION ===
   useEffect(() => {
     const init = async () => {
       const today = new Date().toISOString().split('T')[0]
@@ -94,14 +99,12 @@ export default function AdminDashboard() {
     init()
   }, [supabase])
 
-  // ====== REFRESH ON FILTER CHANGE ======
+  // === REFRESH ON FILTER CHANGE ===
   useEffect(() => {
-    if (selectedDate) {
-      fetchData()
-    }
+    if (selectedDate) fetchData()
   }, [period, selectedDate, filterLocationId])
 
-  // ====== DATE RANGE ======
+  // === DATE RANGE CALC ===
   const getDateRange = () => {
     const base = selectedDate || new Date().toISOString().split('T')[0]
     const anchor = new Date(base)
@@ -117,7 +120,6 @@ export default function AdminDashboard() {
       startObj.setDate(diff)
       const endObj = new Date(startObj)
       endObj.setDate(endObj.getDate() + 6)
-
       start = startObj.toISOString().split('T')[0]
       end = endObj.toISOString().split('T')[0]
       label = `Tydzień: ${start} – ${end}`
@@ -137,17 +139,17 @@ export default function AdminDashboard() {
     return { start, end, label }
   }
 
-  // ====== FETCH DATA ======
+  // === FETCH DATA ===
   const fetchData = async () => {
     setLoading(true)
     const { start, end, label } = getDateRange()
     setDateLabel(label)
 
-    // --- SALES + LABOR from sales_daily ---
+    // 1. Sales & labor from daily reports
     let salesQuery = supabase
       .from('sales_daily')
       .select(
-        'gross_revenue, target_gross_sales, transaction_count, target_transactions, total_labor_hours, avg_hourly_rate, net_revenue',
+        'gross_revenue, target_gross_sales, transaction_count, target_transactions, total_labor_hours, avg_hourly_rate, net_revenue, cash_diff, petty_expenses, daily_losses, daily_refunds',
       )
       .gte('date', start)
       .lte('date', end)
@@ -159,34 +161,30 @@ export default function AdminDashboard() {
     const { data: sales } = await salesQuery
 
     const grossSales =
-      sales?.reduce((sum, r) => sum + (Number(r.gross_revenue) || 0), 0) || 0
+      sales?.reduce((s, r) => s + (Number(r.gross_revenue) || 0), 0) || 0
     const targetGross =
-      sales?.reduce((sum, r) => sum + (Number(r.target_gross_sales) || 0), 0) ||
-      0
+      sales?.reduce((s, r) => s + (Number(r.target_gross_sales) || 0), 0) || 0
 
     const netFromColumn =
-      sales?.reduce((sum, r) => sum + (Number(r.net_revenue) || 0), 0) || 0
+      sales?.reduce((s, r) => s + (Number(r.net_revenue) || 0), 0) || 0
     const netSales =
       netFromColumn > 0 ? netFromColumn : grossSales / (1 + VAT_RATE)
     const planNet = targetGross / (1 + VAT_RATE)
     const vatValue = grossSales - netSales
 
     const transactions =
-      sales?.reduce((sum, r) => sum + (Number(r.transaction_count) || 0), 0) ||
-      0
+      sales?.reduce((s, r) => s + (Number(r.transaction_count) || 0), 0) || 0
     const planTransactions =
-      sales?.reduce((sum, r) => sum + (Number(r.target_transactions) || 0), 0) ||
-      0
+      sales?.reduce((s, r) => s + (Number(r.target_transactions) || 0), 0) || 0
 
     const totalHours =
-      sales?.reduce((sum, r) => sum + (Number(r.total_labor_hours) || 0), 0) ||
-      0
+      sales?.reduce((s, r) => s + (Number(r.total_labor_hours) || 0), 0) || 0
 
     const laborCost =
-      sales?.reduce((sum, r) => {
-        const hours = Number(r.total_labor_hours) || 0
+      sales?.reduce((s, r) => {
+        const h = Number(r.total_labor_hours) || 0
         const rate = Number(r.avg_hourly_rate) || 0
-        return sum + hours * rate
+        return s + h * rate
       }, 0) || 0
 
     const laborPercent = netSales > 0 ? laborCost / netSales : 0
@@ -195,17 +193,26 @@ export default function AdminDashboard() {
     const effectiveHourlyRate =
       totalHours > 0 ? laborCost / totalHours : 0
 
-    // --- COSTS from imported_costs ---
+    // NEW: sums of cash diff & daily op costs
+    const cashDiffTotal =
+      sales?.reduce((s, r) => s + (Number(r.cash_diff) || 0), 0) || 0
+    const pettySum =
+      sales?.reduce((s, r) => s + (Number(r.petty_expenses) || 0), 0) || 0
+    const lossesSum =
+      sales?.reduce((s, r) => s + (Number(r.daily_losses) || 0), 0) || 0
+    const refundsSum =
+      sales?.reduce((s, r) => s + (Number(r.daily_refunds) || 0), 0) || 0
+    const opsExtraOpex = pettySum + lossesSum + refundsSum
+
+    // 2. Imported costs (Excel)
     let costQuery = supabase
       .from('imported_costs')
       .select('amount, cost_type')
       .gte('cost_date', start)
       .lte('cost_date', end)
-
     if (filterLocationId !== 'all') {
       costQuery = costQuery.eq('location_id', filterLocationId)
     }
-
     const { data: imported } = await costQuery
 
     let cogs = 0
@@ -216,25 +223,23 @@ export default function AdminDashboard() {
       else opexExcel += amt
     })
 
-    // --- APPROVED INVOICES ---
+    // 3. Approved invoices
     let manualQuery = supabase
       .from('invoices')
       .select('total_amount')
       .eq('status', 'approved')
       .gte('service_date', start)
       .lte('service_date', end)
-
     if (filterLocationId !== 'all') {
       manualQuery = manualQuery.eq('location_id', filterLocationId)
     }
-
     const { data: manual } = await manualQuery
     const opexManual =
-      manual?.reduce((sum, r) => sum + (Number(r.total_amount) || 0), 0) || 0
+      manual?.reduce((s, r) => s + (Number(r.total_amount) || 0), 0) || 0
 
-    const opex = opexExcel + opexManual
+    const opex = opexExcel + opexManual + opsExtraOpex
 
-    // --- P&L DERIVED ---
+    // 4. Derived margins / result
     const cogsPercent = netSales > 0 ? cogs / netSales : 0
     const grossMarginValue = netSales - cogs
     const grossMarginPercent =
@@ -245,7 +250,7 @@ export default function AdminDashboard() {
     const netMargin =
       netSales > 0 ? operatingProfit / netSales : 0
 
-    // --- ALERTS & STATUS ---
+    // 5. Alerts & status
     const newAlerts: string[] = []
 
     if (laborPercent > LABOR_YELLOW_MAX) {
@@ -255,15 +260,15 @@ export default function AdminDashboard() {
     }
 
     if (grossMarginPercent < GROSS_MARGIN_PLAN_PERCENT - 0.02) {
-      newAlerts.push(
-        'Marża brutto niższa od planu o więcej niż 2 pp',
-      )
+      newAlerts.push('Marża brutto niższa od planu o więcej niż 2 pp')
     }
 
     if (planNet > 0 && netSales < planNet * 0.97) {
-      newAlerts.push(
-        'Sprzedaż netto poniżej planu o więcej niż 3%',
-      )
+      newAlerts.push('Sprzedaż netto poniżej planu o więcej niż 3%')
+    }
+
+    if (Math.abs(cashDiffTotal) > 0.01) {
+      newAlerts.push('Różnica w gotówce (stan raport vs fizyczny)')
     }
 
     let status = ''
@@ -297,23 +302,24 @@ export default function AdminDashboard() {
       grossMarginPercent,
       operatingProfit,
       netMargin,
+      cashDiffTotal,
+      pettySum,
+      lossesSum,
+      refundsSum,
     })
 
     setAlerts(newAlerts)
     setStatusText(status)
 
-    // --- LISTS: PENDING / IMPORTED / HISTORY ---
-
+    // 6. Pending / imported list / history
     let pendingQuery = supabase
       .from('invoices')
       .select('*, locations(name)')
       .eq('status', 'submitted')
       .order('service_date', { ascending: false })
-
     if (filterLocationId !== 'all') {
       pendingQuery = pendingQuery.eq('location_id', filterLocationId)
     }
-
     const { data: pending } = await pendingQuery
     if (pending) setPendingInvoices(pending)
 
@@ -323,11 +329,9 @@ export default function AdminDashboard() {
       .gte('cost_date', start)
       .lte('cost_date', end)
       .limit(100)
-
     if (filterLocationId !== 'all') {
       importedListQuery = importedListQuery.eq('location_id', filterLocationId)
     }
-
     const { data: importedList } = await importedListQuery
     if (importedList) setImportedCosts(importedList)
 
@@ -337,11 +341,9 @@ export default function AdminDashboard() {
       .in('status', ['approved', 'declined'])
       .gte('service_date', start)
       .lte('service_date', end)
-
     if (filterLocationId !== 'all') {
       histQuery = histQuery.eq('location_id', filterLocationId)
     }
-
     const { data: hist } = await histQuery
     if (hist) setHistoryInvoices(hist)
 
@@ -353,17 +355,18 @@ export default function AdminDashboard() {
     fetchData()
   }
 
-  // ====== RENDER ======
-
+  // === RENDER ===
   if (!selectedDate) return <div className="ml-64 p-8">Inicjalizacja…</div>
 
-  // Labor card colors
   const laborColorClass =
     pnl.laborPercent < LABOR_GREEN_MAX
       ? 'text-green-700 bg-green-50 border-green-200'
       : pnl.laborPercent <= LABOR_YELLOW_MAX
       ? 'text-yellow-700 bg-yellow-50 border-yellow-200'
       : 'text-red-700 bg-red-50 border-red-200'
+
+  const cashDiffColor =
+    Math.abs(pnl.cashDiffTotal) < 0.01 ? 'text-green-700' : 'text-red-700'
 
   return (
     <div className="flex bg-gray-50 min-h-screen">
@@ -500,7 +503,7 @@ export default function AdminDashboard() {
           <TabsContent value="dashboard" className="space-y-6">
             {/* ROW 1: SALES */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-              {/* Sprzedaż netto */}
+              {/* Net & Gross */}
               <Card className="border-slate-200 shadow-sm">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-slate-500">
@@ -509,30 +512,30 @@ export default function AdminDashboard() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-3xl font-bold text-slate-900 mb-1">
-                    {formatMoney(pnl.netSales)}
+                    {formatMoney0(pnl.netSales)}
                   </div>
-                  <div className="space-y-1 text-xs text-slate-500">
+                  <div className="text-xs text-slate-500 space-y-1">
                     <div>
                       Sprzedaż brutto:{' '}
-                      <span className="font-medium text-slate-700">
-                        {formatMoney(pnl.grossSales)}
+                      <span className="font-medium">
+                        {formatMoney0(pnl.grossSales)}
                       </span>
                     </div>
                     <div>
                       VAT:{' '}
-                      <span className="font-medium text-slate-700">
-                        {formatMoney(pnl.vatValue)}
+                      <span className="font-medium">
+                        {formatMoney0(pnl.vatValue)}
                       </span>
                     </div>
                     <div>
                       Plan netto:{' '}
-                      <span className="font-medium text-slate-700">
-                        {formatMoney(pnl.planNet)}
+                      <span className="font-medium">
+                        {formatMoney0(pnl.planNet)}
                       </span>
                     </div>
                     <div>
                       Realizacja planu:{' '}
-                      <span className="font-bold text-slate-900">
+                      <span className="font-bold">
                         {pnl.planNet > 0
                           ? formatPercent(pnl.netSales / pnl.planNet)
                           : '0,0%'}
@@ -542,7 +545,7 @@ export default function AdminDashboard() {
                 </CardContent>
               </Card>
 
-              {/* Średni paragon */}
+              {/* AOV */}
               <Card className="border-slate-200 shadow-sm">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-slate-500">
@@ -553,16 +556,16 @@ export default function AdminDashboard() {
                   <div className="text-3xl font-bold text-slate-900 mb-1">
                     {formatMoney2(pnl.aov)}
                   </div>
-                  <div className="space-y-1 text-xs text-slate-500">
+                  <div className="text-xs text-slate-500 space-y-1">
                     <div>
                       Sprzedaż netto:{' '}
-                      <span className="font-medium text-slate-700">
-                        {formatMoney(pnl.netSales)}
+                      <span className="font-medium">
+                        {formatMoney0(pnl.netSales)}
                       </span>
                     </div>
                     <div>
-                      Liczba transakcji:{' '}
-                      <span className="font-medium text-slate-700">
+                      Transakcji:{' '}
+                      <span className="font-medium">
                         {pnl.transactions}
                       </span>
                     </div>
@@ -570,7 +573,7 @@ export default function AdminDashboard() {
                 </CardContent>
               </Card>
 
-              {/* Transakcje */}
+              {/* Transactions */}
               <Card className="border-slate-200 shadow-sm">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-slate-500">
@@ -581,16 +584,16 @@ export default function AdminDashboard() {
                   <div className="text-3xl font-bold text-slate-900 mb-1">
                     {pnl.transactions}
                   </div>
-                  <div className="space-y-1 text-xs text-slate-500">
+                  <div className="text-xs text-slate-500 space-y-1">
                     <div>
                       Plan:{' '}
-                      <span className="font-medium text-slate-700">
+                      <span className="font-medium">
                         {pnl.planTransactions}
                       </span>
                     </div>
                     <div>
                       Odchylenie:{' '}
-                      <span className="font-medium text-slate-700">
+                      <span className="font-medium">
                         {pnl.transactions - pnl.planTransactions}
                       </span>
                     </div>
@@ -598,7 +601,7 @@ export default function AdminDashboard() {
                 </CardContent>
               </Card>
 
-              {/* Sprzedaż / roboczogodzinę */}
+              {/* Sales per hour */}
               <Card className="border-slate-200 shadow-sm">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-slate-500">
@@ -609,16 +612,16 @@ export default function AdminDashboard() {
                   <div className="text-3xl font-bold text-slate-900 mb-1">
                     {formatMoney2(pnl.salesPerHour)}
                   </div>
-                  <div className="space-y-1 text-xs text-slate-500">
+                  <div className="text-xs text-slate-500 space-y-1">
                     <div>
                       Sprzedaż netto:{' '}
-                      <span className="font-medium text-slate-700">
-                        {formatMoney(pnl.netSales)}
+                      <span className="font-medium">
+                        {formatMoney0(pnl.netSales)}
                       </span>
                     </div>
                     <div>
                       Godziny pracy:{' '}
-                      <span className="font-medium text-slate-700">
+                      <span className="font-medium">
                         {pnl.totalHours.toFixed(1)} h
                       </span>
                     </div>
@@ -627,9 +630,9 @@ export default function AdminDashboard() {
               </Card>
             </div>
 
-            {/* ROW 2: PRODUKTYWNOŚĆ */}
+            {/* ROW 2: PRODUCTIVITY */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-              {/* Koszt pracy */}
+              {/* Labor */}
               <Card className={`border ${laborColorClass} shadow-sm`}>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium">
@@ -638,7 +641,7 @@ export default function AdminDashboard() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-3xl font-bold mb-1">
-                    {formatMoney(pnl.laborCost)}
+                    {formatMoney0(pnl.laborCost)}
                   </div>
                   <div className="text-sm font-bold mb-1">
                     {formatPercent(pnl.laborPercent)} sprzedaży netto
@@ -656,15 +659,15 @@ export default function AdminDashboard() {
                         {(
                           (pnl.laborPercent - LABOR_PLAN_PERCENT) *
                           100
-                        ).toFixed(1)}
-                        {' pp'}
+                        ).toFixed(1)}{' '}
+                        pp
                       </span>
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
-              {/* COGS % */}
+              {/* COGS */}
               <Card className="border-slate-200 shadow-sm">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-slate-500">
@@ -675,18 +678,16 @@ export default function AdminDashboard() {
                   <div className="text-3xl font-bold text-slate-900 mb-1">
                     {formatPercent(pnl.cogsPercent)}
                   </div>
-                  <div className="space-y-1 text-xs text-slate-500">
-                    <div>
-                      Wartość:{' '}
-                      <span className="font-medium text-slate-700">
-                        {formatMoney(pnl.cogs)}
-                      </span>
-                    </div>
+                  <div className="text-xs text-slate-500">
+                    Wartość:{' '}
+                    <span className="font-medium text-slate-700">
+                      {formatMoney0(pnl.cogs)}
+                    </span>
                   </div>
                 </CardContent>
               </Card>
 
-              {/* Średnia stawka / godziny */}
+              {/* Effective rate / hours */}
               <Card className="border-slate-200 shadow-sm">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-slate-500">
@@ -697,13 +698,11 @@ export default function AdminDashboard() {
                   <div className="text-3xl font-bold text-slate-900 mb-1">
                     {formatMoney2(pnl.effectiveHourlyRate)}
                   </div>
-                  <div className="space-y-1 text-xs text-slate-500">
-                    <div>
-                      Godziny przepracowane:{' '}
-                      <span className="font-medium text-slate-700">
-                        {pnl.totalHours.toFixed(1)} h
-                      </span>
-                    </div>
+                  <div className="text-xs text-slate-500">
+                    Godziny przepracowane:{' '}
+                    <span className="font-medium text-slate-700">
+                      {pnl.totalHours.toFixed(1)} h
+                    </span>
                   </div>
                 </CardContent>
               </Card>
@@ -717,18 +716,18 @@ export default function AdminDashboard() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-3xl font-bold text-orange-600 mb-1">
-                    {formatMoney(pnl.opex)}
+                    {formatMoney0(pnl.opex)}
                   </div>
                   <div className="text-xs text-slate-500">
-                    Koszty z Excela SEMIS + zatwierdzone faktury
+                    Excel SEMIS + faktury + koszty dnia z raportu
                   </div>
                 </CardContent>
               </Card>
             </div>
 
-            {/* ROW 3: WYNIK */}
+            {/* ROW 3: RESULT */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-              {/* Marża brutto */}
+              {/* Gross margin */}
               <Card className="border-slate-200 shadow-sm">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-slate-500">
@@ -737,7 +736,7 @@ export default function AdminDashboard() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-3xl font-bold text-slate-900 mb-1">
-                    {formatMoney(pnl.grossMarginValue)}
+                    {formatMoney0(pnl.grossMarginValue)}
                   </div>
                   <div className="text-sm font-bold mb-1">
                     {formatPercent(pnl.grossMarginPercent)} sprzedaży netto
@@ -756,15 +755,15 @@ export default function AdminDashboard() {
                           (pnl.grossMarginPercent -
                             GROSS_MARGIN_PLAN_PERCENT) *
                           100
-                        ).toFixed(1)}
-                        {' pp'}
+                        ).toFixed(1)}{' '}
+                        pp
                       </span>
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
-              {/* Koszt całkowity % */}
+              {/* Total costs % */}
               <Card className="border-slate-200 shadow-sm">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-slate-500">
@@ -777,18 +776,16 @@ export default function AdminDashboard() {
                       pnl.netSales > 0 ? pnl.totalCosts / pnl.netSales : 0,
                     )}
                   </div>
-                  <div className="space-y-1 text-xs text-slate-500">
-                    <div>
-                      Wartość:{' '}
-                      <span className="font-medium text-slate-700">
-                        {formatMoney(pnl.totalCosts)}
-                      </span>
-                    </div>
+                  <div className="text-xs text-slate-500">
+                    Wartość:{' '}
+                    <span className="font-medium text-slate-700">
+                      {formatMoney0(pnl.totalCosts)}
+                    </span>
                   </div>
                 </CardContent>
               </Card>
 
-              {/* EBIT lokalny */}
+              {/* EBIT */}
               <Card className="border-slate-200 shadow-sm">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-slate-500">
@@ -803,20 +800,18 @@ export default function AdminDashboard() {
                         : 'text-red-600'
                     }`}
                   >
-                    {formatMoney(pnl.operatingProfit)}
+                    {formatMoney0(pnl.operatingProfit)}
                   </div>
-                  <div className="space-y-1 text-xs text-slate-500">
-                    <div>
-                      Marża operacyjna:{' '}
-                      <span className="font-medium text-slate-700">
-                        {formatPercent(pnl.netMargin)}
-                      </span>
-                    </div>
+                  <div className="text-xs text-slate-500">
+                    Marża operacyjna:{' '}
+                    <span className="font-medium text-slate-700">
+                      {formatPercent(pnl.netMargin)}
+                    </span>
                   </div>
                 </CardContent>
               </Card>
 
-              {/* Marża netto (operacyjna) */}
+              {/* Net margin operational */}
               <Card className="border-slate-200 shadow-sm">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-slate-500">
@@ -838,9 +833,9 @@ export default function AdminDashboard() {
               </Card>
             </div>
 
-            {/* ROW 4: STATUS DNIA + ALERTY */}
+            {/* ROW 4: STATUS + ALERTY + GOTÓWKA / KOSZTY DNIA */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Status dnia */}
+              {/* STATUS */}
               <Card className="lg:col-span-2 border-slate-200 shadow-sm">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-slate-500">
@@ -852,15 +847,14 @@ export default function AdminDashboard() {
                     {statusText}
                   </p>
                   <p className="text-xs text-slate-500">
-                    Logika: kolejność analizy – Sprzedaż → Produktywność →
-                    Marża → Wynik → Alerty.
+                    Kolejność analizy: Sprzedaż → Produktywność → Marża → Wynik → Alerty.
                   </p>
                 </CardContent>
               </Card>
 
-              {/* Alerty */}
+              {/* ALERTY + GOTÓWKA I KOSZTY DNIA */}
               <Card className="border-slate-200 shadow-sm">
-                <CardHeader className="pb-2 flex items-center justify-between">
+                <CardHeader className="pb-1 flex items-center justify-between">
                   <CardTitle className="text-sm font-medium text-slate-500">
                     Alerty operacyjne
                   </CardTitle>
@@ -870,9 +864,9 @@ export default function AdminDashboard() {
                     <AlertTriangle className="w-4 h-4 text-red-500" />
                   )}
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-3 pt-3">
                   {alerts.length === 0 && (
-                    <p className="text-center text-sm text-slate-400 py-4">
+                    <p className="text-center text-sm text-slate-400 py-2">
                       Brak aktywnych alertów.
                     </p>
                   )}
@@ -882,13 +876,50 @@ export default function AdminDashboard() {
                         key={i}
                         className="flex items-start gap-2 bg-slate-50 border border-slate-200 rounded px-2 py-1"
                       >
-                        <span className="mt-0.5">
-                          <AlertTriangle className="w-3 h-3 text-amber-500" />
-                        </span>
+                        <AlertTriangle className="w-3 h-3 text-amber-500 mt-[3px]" />
                         <span>{a}</span>
                       </li>
                     ))}
                   </ul>
+
+                  {/* extra: cash & daily op costs */}
+                  <div className="border-t pt-3 mt-2 text-xs text-slate-500 space-y-1">
+                    <p className="font-semibold text-slate-700">
+                      Gotówka i koszty dnia (z raportu dziennego)
+                    </p>
+                    <p>
+                      Różnica gotówki:{' '}
+                      <span className={cashDiffColor + ' font-bold'}>
+                        {formatMoney2(pnl.cashDiffTotal)}
+                      </span>
+                    </p>
+                    <p>
+                      Wydatki drobne:{' '}
+                      <span className="font-medium">
+                        {formatMoney2(pnl.pettySum)}
+                      </span>
+                    </p>
+                    <p>
+                      Straty:{' '}
+                      <span className="font-medium">
+                        {formatMoney2(pnl.lossesSum)}
+                      </span>
+                    </p>
+                    <p>
+                      Zwroty / reklamacje:{' '}
+                      <span className="font-medium">
+                        {formatMoney2(pnl.refundsSum)}
+                      </span>
+                    </p>
+                    <p>
+                      Suma kosztów dnia:{' '}
+                      <span className="font-bold">
+                        {formatMoney2(
+                          pnl.pettySum + pnl.lossesSum + pnl.refundsSum,
+                        )}
+                      </span>
+                    </p>
+                  </div>
                 </CardContent>
               </Card>
             </div>
@@ -903,7 +934,7 @@ export default function AdminDashboard() {
                     Raport P&L (na sprzedaży netto)
                   </h3>
 
-                  {/* Przychody */}
+                  {/* PRZYCHODY */}
                   <div className="flex justify-between items-end mb-2 border-b border-slate-200 pb-2">
                     <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
                       Przychody
@@ -914,15 +945,15 @@ export default function AdminDashboard() {
                       Sprzedaż netto
                     </span>
                     <span className="font-bold text-slate-900 text-xl">
-                      {formatMoney(pnl.netSales)}
+                      {formatMoney0(pnl.netSales)}
                     </span>
                   </div>
                   <div className="flex justify-between items-center pb-4 border-b border-slate-200 text-xs text-slate-500">
                     <span>Sprzedaż brutto</span>
-                    <span>{formatMoney(pnl.grossSales)}</span>
+                    <span>{formatMoney0(pnl.grossSales)}</span>
                   </div>
 
-                  {/* Koszty */}
+                  {/* KOSZTY */}
                   <div className="flex justify-between items-end mt-8 mb-2 border-b border-slate-200 pb-2">
                     <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
                       Koszty
@@ -935,7 +966,7 @@ export default function AdminDashboard() {
                     </span>
                     <div className="text-right">
                       <span className="font-mono text-slate-900 mr-4">
-                        {formatMoney(pnl.cogs)}
+                        {formatMoney0(pnl.cogs)}
                       </span>
                       <span className="text-xs text-slate-500 font-medium w-16 inline-block text-right">
                         {formatPercent(pnl.cogsPercent)}
@@ -945,11 +976,11 @@ export default function AdminDashboard() {
 
                   <div className="flex justify-between items-center py-3 border-b border-slate-100">
                     <span className="text-slate-700">
-                      Koszt pracy (na podstawie godzin)
+                      Koszt pracy (wg raportu dziennego)
                     </span>
                     <div className="text-right">
                       <span className="font-mono text-slate-900 mr-4">
-                        {formatMoney(pnl.laborCost)}
+                        {formatMoney0(pnl.laborCost)}
                       </span>
                       <span className="text-xs text-slate-500 font-medium w-16 inline-block text-right">
                         {formatPercent(pnl.laborPercent)}
@@ -963,7 +994,7 @@ export default function AdminDashboard() {
                     </span>
                     <div className="text-right">
                       <span className="font-mono text-slate-900 mr-4">
-                        {formatMoney(pnl.opex)}
+                        {formatMoney0(pnl.opex)}
                       </span>
                       <span className="text-xs text-slate-500 font-medium w-16 inline-block text-right">
                         {formatPercent(
@@ -973,16 +1004,26 @@ export default function AdminDashboard() {
                     </div>
                   </div>
 
+                  {/* DODATKOWE KOSZTY DNIA */}
+                  <div className="text-xs text-slate-500 py-3 border-b border-slate-100">
+                    <span className="font-semibold">
+                      W tym koszty dnia z raportu:
+                    </span>{' '}
+                    wydatki drobne {formatMoney2(pnl.pettySum)}, straty{' '}
+                    {formatMoney2(pnl.lossesSum)}, zwroty{' '}
+                    {formatMoney2(pnl.refundsSum)}.
+                  </div>
+
                   <div className="flex justify-between items-center py-4 bg-slate-50 -mx-8 px-8 border-t border-slate-200 mt-2">
                     <span className="font-bold text-slate-800">
                       Suma kosztów
                     </span>
                     <span className="font-bold text-slate-900">
-                      {formatMoney(pnl.totalCosts)}
+                      {formatMoney0(pnl.totalCosts)}
                     </span>
                   </div>
 
-                  {/* Wynik */}
+                  {/* WYNIK */}
                   <div className="flex justify-between items-end mt-8 mb-2 border-b border-slate-200 pb-2">
                     <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
                       Wynik operacyjny
@@ -999,7 +1040,7 @@ export default function AdminDashboard() {
                           : 'text-red-600'
                       }`}
                     >
-                      {formatMoney(pnl.operatingProfit)}
+                      {formatMoney0(pnl.operatingProfit)}
                     </span>
                   </div>
                   <div className="flex justify-between items-center pb-2">
@@ -1102,7 +1143,7 @@ export default function AdminDashboard() {
                       <p className="font-bold">{inv.supplier_name}</p>
                       <p className="text-sm text-slate-500">
                         {inv.locations?.name} • {inv.service_date} •{' '}
-                        {formatMoney(inv.total_amount)}
+                        {formatMoney0(inv.total_amount)}
                       </p>
                       {inv.attachment_url && (
                         <a
@@ -1173,7 +1214,7 @@ export default function AdminDashboard() {
                         </p>
                         <p className="text-sm text-slate-500">
                           {inv.locations?.name} • {inv.service_date} •{' '}
-                          {formatMoney(inv.total_amount)}
+                          {formatMoney0(inv.total_amount)}
                         </p>
                       </div>
                     </div>
