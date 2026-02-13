@@ -1,59 +1,75 @@
 'use client'
-import { FileText, Receipt, Users, LogOut, MapPin } from 'lucide-react'
-import { Logo } from '@/components/Logo' // <--- Import
+
+import { Button } from '@/components/ui/button'
+import {
+  LayoutDashboard, FileText, ClipboardList, LogOut, MapPin
+} from 'lucide-react'
 
 type OpsSidebarProps = {
-  locationName: string;
-  activeView: string;
-  onNavigate: (view: string) => void;
-  onLogout: () => void;
-  onSwitchLocation: () => void;
+  locationName: string
+  activeView: string
+  onNavigate: (view: string) => void
+  onLogout: () => void
+  onSwitchLocation: () => void
 }
 
-export function OpsSidebar({ locationName, activeView, onNavigate, onLogout, onSwitchLocation }: OpsSidebarProps) {
-  const menuItems = [
-    { id: 'reporting', name: 'Daily Reporting', icon: FileText },
-    { id: 'invoices', name: 'Invoices & Costs', icon: Receipt },
-    // { id: 'staffing', name: 'Staffing', icon: Users }, // Hidden per previous request
+export function OpsSidebar({
+  locationName,
+  activeView,
+  onNavigate,
+  onLogout,
+  onSwitchLocation,
+}: OpsSidebarProps) {
+  const navItems = [
+    { key: 'reporting', label: 'Raport dzienny', icon: LayoutDashboard },
+    { key: 'invoices', label: 'Faktury', icon: FileText },
+    { key: 'inventory', label: 'Inwentaryzacja', icon: ClipboardList },
   ]
 
   return (
-    <div className="w-64 min-h-screen bg-white border-r border-gray-200 fixed left-0 top-0 flex flex-col z-10">
-      {/* HEADER */}
-      <div className="p-6 border-b border-gray-100">
-        <Logo textClassName="text-slate-900" />
-        
-        <div className="flex items-center gap-2 mt-4 text-sm text-gray-500 cursor-pointer hover:text-blue-600 bg-gray-50 p-2 rounded" onClick={onSwitchLocation}>
+    <aside className="fixed left-0 top-0 h-screen w-64 bg-slate-900 text-white flex flex-col">
+      {/* Header */}
+      <div className="p-6 border-b border-slate-700">
+        <h1 className="text-xl font-bold">Panel Operacyjny</h1>
+        <button
+          onClick={onSwitchLocation}
+          className="mt-2 flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors"
+        >
           <MapPin className="w-4 h-4" />
-          <span className="truncate max-w-[140px] font-medium">{locationName}</span>
-        </div>
+          <span className="truncate">{locationName}</span>
+        </button>
       </div>
 
-      {/* MENU */}
+      {/* Navigation */}
       <nav className="flex-1 p-4 space-y-1">
-        {menuItems.map((item) => (
-          <div 
-            key={item.id}
-            onClick={() => onNavigate(item.id)}
-            className={`flex items-center gap-3 px-4 py-3 rounded-md text-sm font-medium cursor-pointer transition-colors
-              ${activeView === item.id
-                ? 'bg-gray-900 text-white shadow-md' 
-                : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-              }`}
+        {navItems.map(({ key, label, icon: Icon }) => (
+          <Button
+            key={key}
+            variant="ghost"
+            onClick={() => onNavigate(key)}
+            className={`w-full justify-start text-left h-11 ${
+              activeView === key
+                ? 'bg-slate-700 text-white'
+                : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+            }`}
           >
-            <item.icon className="w-5 h-5" />
-            {item.name}
-          </div>
+            <Icon className="w-5 h-5 mr-3" />
+            {label}
+          </Button>
         ))}
       </nav>
 
-      {/* FOOTER */}
-      <div className="p-4 border-t border-gray-100">
-        <div onClick={onLogout} className="flex items-center gap-3 px-4 py-3 text-sm font-medium text-red-600 hover:bg-red-50 rounded-md cursor-pointer">
-          <LogOut className="w-5 h-5" />
-          Log Out
-        </div>
+      {/* Footer */}
+      <div className="p-4 border-t border-slate-700">
+        <Button
+          variant="ghost"
+          onClick={onLogout}
+          className="w-full justify-start text-slate-400 hover:text-white hover:bg-slate-800"
+        >
+          <LogOut className="w-5 h-5 mr-3" />
+          Wyloguj
+        </Button>
       </div>
-    </div>
+    </aside>
   )
 }
