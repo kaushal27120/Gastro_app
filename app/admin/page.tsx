@@ -1140,17 +1140,16 @@ export default function AdminDashboard() {
                                     <Eye className="w-4 h-4" />
                                   </Button>
                                 )}
-                                {notif.reference_id && (
-                                  <Button size="sm" variant="outline" onClick={() => {
-                                    markNotificationRead(notif.id)
-                                    if (notif.type === 'daily_report') setActiveView('daily_reports')
-                                    else if (notif.type === 'invoice') setActiveView('approvals')
-                                    else if (notif.type === 'inventory') setActiveView('inv_approvals')
-                                    else if (notif.type === 'semis_reconciliation') setActiveView('semis_verification')
-                                  }}>
-                                    <ExternalLink className="w-4 h-4 mr-1" />Przejdź
-                                  </Button>
-                                )}
+                                <Button size="sm" variant="outline" onClick={() => {
+                                  markNotificationRead(notif.id)
+                                  if (notif.type === 'daily_report') setActiveView('daily_reports')
+                                  else if (notif.type === 'invoice') setActiveView('approvals')
+                                  else if (notif.type === 'inventory') setActiveView('inv_approvals')
+                                  else if (notif.type === 'semis_reconciliation') setActiveView('semis_verification')
+                                  else setActiveView('notifications')
+                                }}>
+                                  <ExternalLink className="w-4 h-4 mr-1" />Przejdź
+                                </Button>
                               </div>
                             </div>
                           </div>
