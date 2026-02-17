@@ -17,7 +17,7 @@ import {
   Users, Building2, DollarSign, TrendingDown, Minus, ThumbsUp, ThumbsDown,
   MessageSquare, ExternalLink, ImageIcon
 } from 'lucide-react'
-import * as XLSX from 'xlsx'
+import * as XLSX from 'xlsx'        
 
 /* ================================================================== */
 /*  CONSTANTS                                                          */
@@ -97,7 +97,7 @@ type InventoryProduct = {
 
 type InventoryJob = {
   id: string; location_id: string; type: 'MONTHLY' | 'WEEKLY'
-  status: 'draft' | 'submitted' | 'approved' | 'correction' | 'pending'
+  status: 'draft' | 'submitted' | 'approved' | 'correction' | 'pending' | 'rejected'
   due_date: string; note: string; created_by: string; created_at: string
   submitted_at?: string; submitted_by?: string
   approved_at?: string; approved_by?: string
@@ -242,6 +242,8 @@ export default function AdminDashboard() {
   const [selectedReviewJob, setSelectedReviewJob] = useState<InventoryJob | null>(null)
   const [reviewJobItems, setReviewJobItems] = useState<InventoryJobItem[]>([])
   const [correctionNote, setCorrectionNote] = useState('')
+  const [inventoryHistoryJobs, setInventoryHistoryJobs] = useState<InventoryJob[]>([])
+  const [invApprovalsTab, setInvApprovalsTab] = useState<'pending' | 'history'>('pending')
 
   // ── Monthly Generator ──
   const [monthlyMonth, setMonthlyMonth] = useState('')
@@ -528,7 +530,7 @@ export default function AdminDashboard() {
       .from('invoices')
       .select('*, locations(name)')
       .in('status', ['approved', 'declined'])
-      .order('updated_at', { ascending: false }) // Most recently processed
+      .order('service_date', { ascending: false }) // Most recently processed by service date
       .limit(50)
     
     if (filterLocationId !== 'all') hq = hq.eq('location_id', filterLocationId)
@@ -553,16 +555,46 @@ export default function AdminDashboard() {
   useEffect(() => { if (selectedDate) fetchDashboard() }, [period, selectedDate, filterLocationId])
 
   const updateInvoiceStatus = async (id: string, status: string) => {
-    await supabase.from('invoices').update({ status }).eq('id', id)
-    
-    // Mark related notification as actioned
-    await supabase.from('admin_notifications')
-      .update({ status: 'actioned', actioned_at: new Date().toISOString() })
-      .eq('reference_id', id)
-    
-    fetchDashboard()
-    fetchNotifications()
+    try {
+      if (!id) { alert('Brak identyfikatora faktury'); return }
+      setLoading(true)
+
+      // 1. Update status in DB and return the updated row (for debugging/confirmation)
+      const { data: updated, error: updateError } = await supabase.from('invoices')
+        .update({ status })
+        .eq('id', id)
+        .select()
+        .single()
+
+      if (updateError) throw updateError
+
+      // 2. Mark notification as done (ignore if none)
+      const { error: notifError } = await supabase.from('admin_notifications')
+        .update({ status: 'actioned', actioned_at: new Date().toISOString() })
+        .eq('reference_id', id)
+
+      if (notifError) console.warn('Notification update error:', notifError.message)
+
+      // 3. Refresh dashboard & notifications
+      await fetchDashboard()
+      await fetchNotifications()
+
+      alert(`✅ Faktura ${status === 'approved' ? 'zatwierdzona' : 'odrzucona'}`)
+      setLoading(false)
+      return updated
+    } catch (err: any) {
+      console.error('Error updating invoice:', err)
+      const msg = err?.message || (err?.error && err.error.message) || String(err)
+      alert('❌ Błąd podczas aktualizacji faktury: ' + msg)
+      setLoading(false)
+    }
   }
+
+  // Ensure inventory approvals counts are loaded on mount so sidebar shows correct counts
+  useEffect(() => {
+    fetchSubmittedJobs()
+    fetchInventoryHistory()
+  }, [])
 
   // ═══════════════════════════════════════════════════════════════════
   //  FETCH: SEMIS Verification
@@ -728,14 +760,87 @@ export default function AdminDashboard() {
   // ═══════════════════════════════════════════════════════════════════
   //  INVENTORY: Approvals
   // ═══════════════════════════════════════════════════════════════════
+  // Find "const fetchSubmittedJobs" and replace with this:
   const fetchSubmittedJobs = async () => {
-    const { data } = await supabase.from('inventory_jobs')
-      .select('*, locations:location_id(name), inventory_job_items(count)')
-      .in('status', ['submitted', 'pending']) // Checks both statuses
-      .order('submitted_at', { ascending: false })
-    if (data) setSubmittedJobs(data.map((j: any) => ({ ...j, location_name: j.locations?.name || '?', item_count: j.inventory_job_items?.[0]?.count || 0 })))
+    try {
+      // Simpler, robust query: get all jobs that are not final/draft states and include item counts
+      let q = supabase.from('inventory_jobs')
+        .select('*, inventory_job_items(id), location_id')
+        .not('status', 'in', '(draft,approved,rejected,correction)')
+        .order('created_at', { ascending: false })
+
+      if (filterLocationId !== 'all') q = q.eq('location_id', filterLocationId)
+
+      const { data, error } = await q
+      if (error) {
+        const msg = error.message || JSON.stringify(error)
+        console.error('Inventory Fetch Error (query):', msg, error)
+        alert('Błąd pobierania inwentaryzacji: ' + msg)
+        setSubmittedJobs([])
+        return
+      }
+
+      if (!data || data.length === 0) {
+        setSubmittedJobs([])
+        return
+      }
+
+      // Fetch location names separately (handles missing FK relationships)
+      const locIds = Array.from(new Set(data.map((j: any) => j.location_id).filter(Boolean)))
+      let locMap: Record<string, string> = {}
+      if (locIds.length) {
+        const { data: locs, error: locErr } = await supabase.from('locations').select('id, name').in('id', locIds)
+        if (!locErr && locs) locs.forEach((l: any) => { locMap[l.id] = l.name })
+      }
+
+      setSubmittedJobs(data.map((j: any) => ({
+        ...j,
+        location_name: locMap[j.location_id] || '?',
+        item_count: (j.inventory_job_items || []).length
+      })))
+    } catch (err: any) {
+      // Serialize error with non-enumerable props for better debugging
+      console.error('Inventory Fetch Error (exception):', err, JSON.stringify(err, Object.getOwnPropertyNames(err)))
+      alert('Błąd pobierania inwentaryzacji — sprawdź uprawnienia lub konsolę: ' + (err?.message || String(err)))
+      setSubmittedJobs([])
+    }
   }
-  useEffect(() => { if (activeView === 'inv_approvals') fetchSubmittedJobs() }, [activeView])
+
+  const fetchInventoryHistory = async () => {
+    try {
+      let q = supabase.from('inventory_jobs')
+        .select('*, inventory_job_items(id), location_id')
+        .in('status', ['approved', 'rejected', 'correction'])
+        .order('created_at', { ascending: false })
+        .limit(50)
+
+      if (filterLocationId !== 'all') q = q.eq('location_id', filterLocationId)
+
+      const { data, error } = await q
+      
+      if (data) {
+        const locIds = Array.from(new Set(data.map((j: any) => j.location_id).filter(Boolean)))
+        let locMap: Record<string, string> = {}
+        if (locIds.length) {
+          const { data: locs, error: locErr } = await supabase.from('locations').select('id, name').in('id', locIds)
+          if (!locErr && locs) locs.forEach((l: any) => { locMap[l.id] = l.name })
+        }
+
+        setInventoryHistoryJobs(data.map((j: any) => ({
+          ...j,
+          location_name: locMap[j.location_id] || '?',
+          item_count: (j.inventory_job_items || []).length
+        })))
+      }
+    } catch (e) { console.error('Inventory History Fetch Error:', e) }
+  }
+
+  useEffect(() => { 
+    if (activeView === 'inv_approvals') {
+      fetchSubmittedJobs()
+      fetchInventoryHistory()
+    }
+  }, [activeView, filterLocationId])
 
   const openReviewJob = async (job: InventoryJob) => {
     setSelectedReviewJob(job); setCorrectionNote('')
@@ -1362,8 +1467,24 @@ export default function AdminDashboard() {
                       )}
                     </div>
                     <div className="flex gap-2">
-                      <Button variant="destructive" size="sm" onClick={() => updateInvoiceStatus(inv.id, 'declined')}>Odrzuć</Button>
-                      <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => updateInvoiceStatus(inv.id, 'approved')}>Zatwierdź</Button>
+                      <Button 
+                        variant="destructive" 
+                        size="sm" 
+                        onClick={() => updateInvoiceStatus(inv.id, 'declined')}
+                        disabled={loading}
+                      >
+                        {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                        Odrzuć
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        className="bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed" 
+                        onClick={() => updateInvoiceStatus(inv.id, 'approved')}
+                        disabled={loading}
+                      >
+                        {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                        Zatwierdź
+                      </Button>
                     </div>
                   </div>
                 ))}
@@ -1562,18 +1683,82 @@ export default function AdminDashboard() {
         {/*  INVENTORY APPROVALS                                   */}
         {/* ═══════════════════════════════════════════════════════ */}
         {activeView === 'inv_approvals' && (
-          <div><h1 className="text-3xl font-bold mb-6">Inwentaryzacje do zatwierdzenia</h1>
-            <Card><CardContent className="pt-4">
-              {submittedJobs.length === 0 ? <p className="text-center text-slate-400 py-8">Brak oczekujących</p> :
-                submittedJobs.map(job => (
-                  <div key={job.id} className="flex items-center justify-between border rounded-lg p-4 mb-3 hover:bg-slate-50 cursor-pointer" onClick={() => openReviewJob(job)}>
-                    <div><p className="font-bold">{job.location_name}</p>
-                      <p className="text-sm text-slate-500">{job.type === 'MONTHLY' ? '📅' : '📋'} {job.type} • {job.due_date} • {job.item_count} poz.</p>
-                      {job.submitted_by && <p className="text-xs text-slate-400">Przez: {job.submitted_by}</p>}</div>
-                    <ChevronRight className="w-5 h-5 text-slate-400" />
+          <div><h1 className="text-3xl font-bold mb-6">Inwentaryzacje</h1>
+            <div className="flex gap-2 mb-6">
+              <Button 
+                variant={invApprovalsTab === 'pending' ? 'default' : 'outline'}
+                onClick={() => setInvApprovalsTab('pending')}
+                className="gap-2"
+              >
+                <AlertCircle className="w-4 h-4" />
+                Oczekujące ({submittedJobs.length})
+              </Button>
+              <Button 
+                variant={invApprovalsTab === 'history' ? 'default' : 'outline'}
+                onClick={() => setInvApprovalsTab('history')}
+                className="gap-2"
+              >
+                <Clock className="w-4 h-4" />
+                Historia ({inventoryHistoryJobs.length})
+              </Button>
+            </div>
+
+            {invApprovalsTab === 'pending' && (
+              <Card><CardContent className="pt-4">
+                {submittedJobs.length === 0 ? <p className="text-center text-slate-400 py-8">Brak oczekujących inwentaryzacji</p> :
+                  submittedJobs.map(job => (
+                    <div key={job.id} className="flex items-center justify-between border rounded-lg p-4 mb-3 hover:bg-slate-50 cursor-pointer" onClick={() => openReviewJob(job)}>
+                      <div><p className="font-bold">{job.location_name}</p>
+                        <p className="text-sm text-slate-500">{job.type === 'MONTHLY' ? '📅' : '📋'} {job.type} • {job.due_date} • {job.item_count} poz.</p>
+                        {job.submitted_by && <p className="text-xs text-slate-400">Wysłana przez: {job.submitted_by}</p>}</div>
+                      <ChevronRight className="w-5 h-5 text-slate-400" />
+                    </div>
+                  ))}
+              </CardContent></Card>
+            )}
+
+            {invApprovalsTab === 'history' && (
+              <Card><CardContent className="pt-4">
+                {inventoryHistoryJobs.length === 0 ? <p className="text-center text-slate-400 py-8">Brak historii inwentaryzacji</p> :
+                  <div className="space-y-3">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b text-left text-xs text-slate-500 uppercase">
+                          <th className="py-2 pr-2 font-semibold">Lokalizacja</th>
+                          <th className="py-2 pr-2 font-semibold">Typ</th>
+                          <th className="py-2 pr-2 font-semibold">Termin</th>
+                          <th className="py-2 pr-2 font-semibold">Status</th>
+                          <th className="py-2 pr-2 font-semibold">Wysłana</th>
+                          <th className="py-2 pr-2 font-semibold">Przez</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {inventoryHistoryJobs.map(job => (
+                          <tr key={job.id} className="border-b hover:bg-slate-50 cursor-pointer" onClick={() => openReviewJob(job)}>
+                            <td className="py-3 pr-2 font-medium">{job.location_name}</td>
+                            <td className="py-3 pr-2">{job.type === 'MONTHLY' ? '📅 Miesięczna' : '📋 Tygodniowa'}</td>
+                            <td className="py-3 pr-2 text-slate-600">{job.due_date}</td>
+                            <td className="py-3 pr-2">
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                job.status === 'approved' ? 'bg-green-100 text-green-700' :
+                                job.status === 'correction' ? 'bg-amber-100 text-amber-700' :
+                                job.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'
+                              }`}>
+                                {job.status === 'approved' ? '✓ Zatwierdzona' :
+                                 job.status === 'correction' ? '↩ Do korekty' :
+                                 job.status === 'rejected' ? '✕ Odrzucona' : job.status}
+                              </span>
+                            </td>
+                            <td className="py-3 pr-2 text-xs text-slate-500">{job.submitted_at?.split('T')[0]}</td>
+                            <td className="py-3 pr-2 text-xs text-slate-500">{job.submitted_by}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                ))}
-            </CardContent></Card>
+                }
+              </CardContent></Card>
+            )}
           </div>
         )}
 
@@ -1764,24 +1949,29 @@ export default function AdminDashboard() {
             <div className="mb-8">
               <h2 className="text-xl font-bold mb-4">Faktury</h2>
               <Card><CardContent className="pt-4">
-                {historyInvoices.length === 0 ? <p className="text-center text-slate-400 py-4">Brak faktur</p> :
-                  historyInvoices.map(inv => (
-                    <div key={inv.id} className="flex justify-between items-center border-b py-3 px-2 hover:bg-slate-50">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-2 h-2 rounded-full ${inv.status === 'approved' ? 'bg-green-500' : 'bg-red-500'}`} />
-                        <div>
-                          <p className={`font-bold ${inv.status === 'declined' ? 'line-through text-slate-400' : ''}`}>{inv.supplier_name}</p>
-                          <p className="text-sm text-slate-500">{inv.locations?.name} • {inv.service_date} • {fmt0(inv.total_amount || inv.total_net || 0)}</p>
-                          {inv.attachment_url && (
-                            <a href={inv.attachment_url} target="_blank" rel="noopener noreferrer" className="flex items-center text-blue-600 hover:text-blue-800 text-xs mt-1 font-medium">
-                              <ImageIcon className="w-3 h-3 mr-1" /> Zobacz zdjęcie
-                            </a>
-                          )}
-                        </div>
+              {historyInvoices.length === 0 ? (
+                <p className="text-center text-slate-400 py-4">Brak faktur</p>
+              ) : (
+                historyInvoices.map(inv => (
+                  <div key={inv.id} className="flex justify-between items-center border-b py-3 px-2 hover:bg-slate-50">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-2 h-2 rounded-full mt-2 ${inv.status === 'approved' ? 'bg-green-500' : 'bg-red-500'}`} />
+                      <div>
+                        <p className="font-bold">{inv.supplier_name}</p>
+                        <p className="text-sm text-slate-500">{inv.locations?.name} • {fmt0(inv.total_amount || 0)}</p>
+                        
+                        {/* THIS IS THE PART THAT SHOWS THE PHOTO LINK */}
+                        {inv.attachment_url && (
+                          <a href={inv.attachment_url} target="_blank" rel="noopener noreferrer" className="flex items-center text-blue-600 hover:text-blue-800 text-xs mt-1 font-medium">
+                            <ImageIcon className="w-3 h-3 mr-1" /> Zobacz zdjęcie
+                          </a>
+                        )}
                       </div>
-                      <span className={`text-xs font-bold uppercase ${inv.status === 'approved' ? 'text-green-600' : 'text-red-600'}`}>{inv.status === 'approved' ? 'zatwierdzona' : 'odrzucona'}</span>
                     </div>
-                  ))}
+                    <span className="text-xs uppercase font-bold">{inv.status}</span>
+                  </div>
+                ))
+              )}
               </CardContent></Card>
             </div>
 
