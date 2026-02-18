@@ -55,31 +55,33 @@ export default function LoginPage() {
           <CardTitle className="text-center text-2xl font-bold text-gray-900">Login</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div>
-            <Input 
-              type="email" 
-              placeholder="name@company.com" 
-              className="h-12 text-lg bg-gray-50"
-              value={email} 
-              onChange={(e) => setEmail(e.target.value)} 
-            />
-          </div>
-          <div>
-            <Input 
-              type="password" 
-              placeholder="Password" 
-              className="h-12 text-lg bg-gray-50"
-              value={password} 
-              onChange={(e) => setPassword(e.target.value)} 
-            />
-          </div>
-          <Button 
-            className="w-full h-12 text-lg bg-black hover:bg-gray-800 text-white font-bold" 
-            onClick={handleLogin}
-            disabled={loading}
-          >
-            {loading ? 'Authenticating...' : 'Sign In'}
-          </Button>
+          <form onSubmit={(e) => { e.preventDefault(); handleLogin(); }} className="space-y-4">
+            <div>
+              <Input
+                type="email"
+                placeholder="name@company.com"
+                className="h-12 text-lg bg-gray-50"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
+            <div>
+              <Input
+                type="password"
+                placeholder="Password"
+                className="h-12 text-lg bg-gray-50"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </div>
+            <Button
+              type="submit"
+              className="w-full h-12 text-lg bg-black hover:bg-gray-800 text-white font-bold"
+              disabled={loading}
+            >
+              {loading ? 'Authenticating...' : 'Sign In'}
+            </Button>
+          </form>
         </CardContent>
       </Card>
       

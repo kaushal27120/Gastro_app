@@ -693,6 +693,26 @@ export default function AdminDashboard() {
     setEditingProduct(null); fetchProducts()
   }
 
+  const deleteProduct = async (id: string) => {
+    // Check for foreign-key references (inventory_job_items)
+    const { data: refs, error: refErr } = await supabase.from('inventory_job_items').select('id').eq('product_id', id).limit(1)
+    if (refErr) { alert('Błąd sprawdzania powiązań: ' + refErr.message); return }
+
+    if (refs && refs.length > 0) {
+      const doDeactivate = confirm('Produkt jest używany w inwentaryzacjach. Nie można go usunąć. Wyłączyć produkt zamiast usuwać?')
+      if (!doDeactivate) return
+      const { error: updErr } = await supabase.from('inventory_products').update({ active: false }).eq('id', id)
+      if (updErr) alert('Błąd przy wyłączaniu: ' + updErr.message)
+      else fetchProducts()
+      return
+    }
+
+    if (!confirm('Usunąć produkt?')) return
+    const { error } = await supabase.from('inventory_products').delete().eq('id', id)
+    if (error) alert('Błąd: ' + error.message)
+    else fetchProducts()
+  }
+
   const toggleProductActive = async (id: string, active: boolean) => {
     await supabase.from('inventory_products').update({ active: !active }).eq('id', id)
     fetchProducts()
@@ -1609,12 +1629,19 @@ export default function AdminDashboard() {
                     <td><Input type="number" value={editingProduct.last_price} onChange={e => setEditingProduct({...editingProduct, last_price: Number(e.target.value)})} className="h-8 w-20 text-right" /></td>
                     <td><input type="checkbox" checked={editingProduct.is_food} onChange={e => setEditingProduct({...editingProduct, is_food: e.target.checked})} /></td>
                     <td>{p.active ? '✅' : '❌'}</td>
-                    <td className="flex gap-1"><Button size="sm" variant="ghost" onClick={() => updateProduct(editingProduct)}><Save className="w-3 h-3" /></Button><Button size="sm" variant="ghost" onClick={() => setEditingProduct(null)}><XCircle className="w-3 h-3" /></Button></td>
+                    <td className="flex gap-1">
+                      <Button size="sm" variant="ghost" onClick={() => updateProduct(editingProduct)}><Save className="w-3 h-3" /></Button>
+                      <Button size="sm" variant="ghost" onClick={() => setEditingProduct(null)}><XCircle className="w-3 h-3" /></Button>
+                      <Button size="sm" variant="ghost" className="text-red-600 hover:text-red-700" onClick={() => deleteProduct(p.id)}><Trash2 className="w-3 h-3" /></Button>
+                    </td>
                   </>) : (<>
                     <td className="py-2 pr-2 font-medium">{p.name}</td><td className="text-xs">{p.category}</td><td className="text-xs">{p.unit}</td>
                     <td className="text-right">{fmt2(p.last_price)}</td><td>{p.is_food ? '🍎' : '📦'}</td>
                     <td><button onClick={() => toggleProductActive(p.id, p.active)}>{p.active ? <ToggleRight className="w-5 h-5 text-green-600" /> : <ToggleLeft className="w-5 h-5 text-slate-400" />}</button></td>
-                    <td><Button size="sm" variant="ghost" onClick={() => setEditingProduct({...p})}><Edit2 className="w-3 h-3" /></Button></td>
+                    <td className="flex gap-1">
+                      <Button size="sm" variant="ghost" onClick={() => setEditingProduct({...p})}><Edit2 className="w-3 h-3" /></Button>
+                      <Button size="sm" variant="ghost" className="text-red-600 hover:text-red-700" onClick={() => deleteProduct(p.id)}><Trash2 className="w-3 h-3" /></Button>
+                    </td>
                   </>)}
                 </tr>
               ))}</tbody></table>
