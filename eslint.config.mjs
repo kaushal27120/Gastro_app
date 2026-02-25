@@ -10,6 +10,11 @@ const compat = new FlatCompat({
 });
 
 const eslintConfig = [
+  // Ignore build output and dependencies
+  {
+    ignores: ["**/.next/**", "**/node_modules/**", "tailwind.config.ts"],
+  },
+  // Base Next.js + TypeScript config
   ...compat.extends("next/core-web-vitals", "next/typescript"),
 ];
 

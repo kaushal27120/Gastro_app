@@ -1,23 +1,43 @@
-'use client'
-import { useEffect, useState } from 'react'
-import { createClient } from '../supabase-client'
-import { Sidebar } from '@/components/Sidebar'
+"use client";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { createClient } from "../supabase-client";
+import { Sidebar } from "@/components/Sidebar";
 
 export default function FinancePage() {
-  const supabase = createClient()
-  const [invoices, setInvoices] = useState<any[]>([])
+  const supabase = createClient();
+  const router = useRouter();
+  const [invoices, setInvoices] = useState<any[]>([]);
+
+  const handleNavigate = (view: string) => {
+    // Placeholder navigation handler for now; extend when finance views expand
+    console.log("Finance sidebar navigation to:", view);
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.push("/login");
+  };
 
   useEffect(() => {
     const fetchInvoices = async () => {
-      const { data } = await supabase.from('invoices').select('*, locations(name)').order('service_date', { ascending: false })
-      if (data) setInvoices(data)
-    }
-    fetchInvoices()
-  }, [])
+      const { data } = await supabase
+        .from("invoices")
+        .select("*, locations(name)")
+        .order("service_date", { ascending: false });
+      if (data) setInvoices(data);
+    };
+    fetchInvoices();
+  }, [supabase]);
 
   return (
     <div className="flex bg-gray-50 min-h-screen">
-      <Sidebar />
+      <Sidebar
+        adminName="Finanse"
+        activeView="dashboard"
+        onNavigate={handleNavigate}
+        onLogout={handleLogout}
+      />
       <main className="flex-1 ml-64 p-8">
         <header className="mb-8">
           <h1 className="text-3xl font-bold text-slate-900">Finanse i Rachunkowość</h1>
