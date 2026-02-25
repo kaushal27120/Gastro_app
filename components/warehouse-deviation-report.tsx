@@ -406,35 +406,150 @@ export function WarehouseDeviationReport({
 
       {/* TRENDS TAB */}
       <TabsContent value="trends" className="space-y-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <TrendingUp size={20} />
-              Deviation Trends
-            </CardTitle>
-            <CardDescription>Top 5 most deviating ingredients (month-to-month)</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {['Salmon', 'Beef', 'Butter', 'Cream', 'Potatoes'].map((ing, idx) => (
-                <div key={idx} className="space-y-2">
-                  <div className="flex justify-between items-center">
-                    <span className="font-semibold">{ing}</span>
-                    <span className="text-sm text-gray-600">
-                      Jan: +8% | Feb: +15% | Mar: +21% ↗️
-                    </span>
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div className="bg-red-500 h-2 rounded-full" style={{ width: '85%' }}></div>
-                  </div>
-                  <p className="text-xs text-red-600">
-                    ⚠️ Trending upward — possible recipe error or systematic waste
-                  </p>
+        {deviations.length === 0 ? (
+          <Card>
+            <CardContent className="pt-6 text-center py-12">
+              <p className="text-gray-500">Brak danych odchyleń do wyświetlenia</p>
+            </CardContent>
+          </Card>
+        ) : (
+          <>
+            {/* Top Deviating Ingredients */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <TrendingUp size={20} />
+                  Top odchylenia
+                </CardTitle>
+                <CardDescription>Składniki z największymi odchyleniami w wybranym okresie</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {deviations
+                    .sort((a, b) => Math.abs(b.deviationPct) - Math.abs(a.deviationPct))
+                    .slice(0, 5)
+                    .map((dev, idx) => (
+                      <div key={dev.id} className="space-y-2">
+                        <div className="flex justify-between items-center">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-lg text-gray-600">#{idx + 1}</span>
+                            <div>
+                              <span className="font-semibold">{dev.ingredient}</span>
+                              <p className="text-xs text-gray-500">{dev.category}</p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <span className={`text-sm font-bold ${dev.type === 'positive' ? 'text-red-600' : 'text-green-600'}`}>
+                              {dev.type === 'positive' ? '+' : '−'}{dev.deviationPct.toFixed(1)}%
+                            </span>
+                            <p className="text-xs text-gray-500">{dev.type === 'positive' ? '+' : '−'}{Math.abs(dev.deviation).toFixed(1)} j.m.</p>
+                          </div>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-2">
+                          <div 
+                            className={`h-2 rounded-full transition-all ${
+                              dev.type === 'positive' 
+                                ? 'bg-red-500' 
+                                : 'bg-green-500'
+                            }`}
+                            style={{ width: `${Math.min(dev.deviationPct, 100)}%` }}
+                          />
+                        </div>
+                        <p className={`text-xs ${dev.status === 'critical' ? 'text-red-600' : dev.status === 'warning' ? 'text-yellow-600' : 'text-green-600'}`}>
+                          {dev.status === 'critical' && '🔴 Krytyczne'}
+                          {dev.status === 'warning' && '🟠 Ostrzeżenie'}
+                          {dev.status === 'ok' && '🟢 OK'} 
+                          {dev.type === 'positive' && ' — możliwa strata lub błąd receptury'}
+                          {dev.type === 'negative' && ' — mniej zużycia niż oczekiwano'}
+                        </p>
+                      </div>
+                    ))}
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+              </CardContent>
+            </Card>
+
+            {/* Status Breakdown */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Podsumowanie statusów</CardTitle>
+                <CardDescription>Rozkład odchyleń wg kategorii ryzyka</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="text-center p-4 bg-red-50 rounded-lg border border-red-200">
+                    <div className="text-2xl font-bold text-red-600">
+                      {deviations.filter(d => d.status === 'critical').length}
+                    </div>
+                    <div className="text-sm text-red-700 font-semibold">Krytyczne</div>
+                    <div className="text-xs text-red-600 mt-1">
+                      {deviations.filter(d => d.status === 'critical').length > 0 
+                        ? `${((deviations.filter(d => d.status === 'critical').length / deviations.length) * 100).toFixed(0)}% składników`
+                        : 'Brak'}
+                    </div>
+                  </div>
+                  <div className="text-center p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+                    <div className="text-2xl font-bold text-yellow-600">
+                      {deviations.filter(d => d.status === 'warning').length}
+                    </div>
+                    <div className="text-sm text-yellow-700 font-semibold">Ostrzeżenia</div>
+                    <div className="text-xs text-yellow-600 mt-1">
+                      {deviations.filter(d => d.status === 'warning').length > 0
+                        ? `${((deviations.filter(d => d.status === 'warning').length / deviations.length) * 100).toFixed(0)}% składników`
+                        : 'Brak'}
+                    </div>
+                  </div>
+                  <div className="text-center p-4 bg-green-50 rounded-lg border border-green-200">
+                    <div className="text-2xl font-bold text-green-600">
+                      {deviations.filter(d => d.status === 'ok').length}
+                    </div>
+                    <div className="text-sm text-green-700 font-semibold">W normie</div>
+                    <div className="text-xs text-green-600 mt-1">
+                      {deviations.filter(d => d.status === 'ok').length > 0
+                        ? `${((deviations.filter(d => d.status === 'ok').length / deviations.length) * 100).toFixed(0)}% składników`
+                        : 'Brak'}
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Type Breakdown */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Typ odchyleń</CardTitle>
+                <CardDescription>Rozkład strat vs nadwyżek</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-4 bg-red-50 rounded-lg border border-red-200">
+                    <div className="text-lg font-bold text-red-600">
+                      {deviations.filter(d => d.type === 'positive').length}
+                    </div>
+                    <div className="text-sm text-red-700 font-semibold">Straty/Nadmierne zużycie</div>
+                    <div className="text-xs text-red-600 mt-2">
+                      Łącznie: {deviations
+                        .filter(d => d.type === 'positive')
+                        .reduce((sum, d) => sum + d.valueZl, 0)
+                        .toFixed(0)} zł
+                    </div>
+                  </div>
+                  <div className="p-4 bg-green-50 rounded-lg border border-green-200">
+                    <div className="text-lg font-bold text-green-600">
+                      {deviations.filter(d => d.type === 'negative').length}
+                    </div>
+                    <div className="text-sm text-green-700 font-semibold">Nadwyżki/Mniej zużycia</div>
+                    <div className="text-xs text-green-600 mt-2">
+                      Łącznie: {Math.abs(deviations
+                        .filter(d => d.type === 'negative')
+                        .reduce((sum, d) => sum + d.valueZl, 0))
+                        .toFixed(0)} zł
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </>
+        )}
       </TabsContent>
       </Tabs>
     </div>

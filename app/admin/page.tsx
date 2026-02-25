@@ -118,114 +118,271 @@ function IngredientsSection({ supabase }: { supabase: SupabaseClient }) {
   }
 
   async function deleteIngredient(id: string) {
-    await supabase.from("ingredients").delete().eq("id", id);
-    fetchIngredients();
+    if (window.confirm('Czy na pewno chcesz usunąć ten składnik?')) {
+      try {
+        const { error } = await supabase.from("ingredients").delete().eq("id", id);
+        if (error) throw error;
+        fetchIngredients();
+      } catch (error) {
+        alert('Błąd podczas usuwania: ' + (error instanceof Error ? error.message : String(error)));
+      }
+    }
   }
 
   return (
     <section className="my-8">
-      <h2 className="text-xl font-bold mb-4">Baza danych ingredientów</h2>
-      <div className="flex gap-2 mb-2">
-        <Input
-          placeholder="Wyszukaj ingredienty..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-        />
-        <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}>
-          <option value="">Wszystkie kategorie</option>
-          {INGREDIENT_CATEGORIES.map(cat => (
-            <option key={cat} value={cat}>{cat}</option>
-          ))}
-        </select>
-        <Button onClick={() => setSortBy("name")}>Sortuj po nazwie</Button>
-          <Button onClick={() => setSortBy("last_price")}>Sortuj po cenie</Button>
+      {/* Header */}
+      <div className="mb-8">
+        <h2 className="text-4xl font-bold text-gray-900 mb-2">Składniki</h2>
+        <p className="text-gray-600">Zarządzaj bazą danych składników, cenami i progami minimalnych</p>
       </div>
-      <table className="w-full border mb-4">
-        <thead>
-          <tr>
-            <th>Nazwa</th>
-            <th>Kategoria</th>
-            <th>Jednostka</th>
-            <th>Min próg</th>
-            <th>Cena</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
+
+      {/* Search & Filter Bar */}
+      <Card className="mb-6 border-0 shadow-md">
+        <CardContent className="pt-6">
+          <div className="space-y-4">
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <Input
+                  placeholder="Wyszukaj składnik..."
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  className="h-10"
+                />
+              </div>
+              <select 
+                value={categoryFilter} 
+                onChange={e => setCategoryFilter(e.target.value)}
+                className="px-4 py-2 border border-gray-300 rounded-md bg-white hover:border-gray-400 transition"
+              >
+                <option value="">Wszystkie kategorie</option>
+                {INGREDIENT_CATEGORIES.map(cat => (
+                  <option key={cat} value={cat}>{cat}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex gap-2">
+              <Button 
+                onClick={() => setSortBy("name")}
+                variant={sortBy === "name" ? "default" : "outline"}
+                size="sm"
+              >
+                Sortuj po nazwie
+              </Button>
+              <Button 
+                onClick={() => setSortBy("last_price")}
+                variant={sortBy === "last_price" ? "default" : "outline"}
+                size="sm"
+              >
+                Sortuj po cenie
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Ingredients List */}
+      {ingredients.length === 0 ? (
+        <Card className="text-center py-12 border-dashed">
+          <p className="text-gray-500 text-lg">Brak składników</p>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 mb-8">
           {ingredients.map(ing => (
-            <tr key={ing.id}>
-              {editingId === ing.id ? (
-                <>
-                  <td><Input value={editIngredient.name || ing.name} onChange={e => setEditIngredient({ ...editIngredient, name: e.target.value })} /></td>
-                  <td>
-                    <select value={editIngredient.category || ing.category} onChange={e => setEditIngredient({ ...editIngredient, category: e.target.value })}>
-                      {INGREDIENT_CATEGORIES.map(cat => (
-                        <option key={cat} value={cat}>{cat}</option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <select value={editIngredient.base_unit || ing.base_unit} onChange={e => setEditIngredient({ ...editIngredient, base_unit: e.target.value })}>
-                      {INGREDIENT_UNITS.map(u => (
-                        <option key={u} value={u}>{u}</option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <Input
-                      value={(editIngredient.min_threshold ?? ing.min_threshold ?? '') as any}
-                      onChange={e => setEditIngredient({ ...editIngredient, min_threshold: Number(e.target.value) })}
-                    />
-                  </td>
-                  <td>
-                    <Input
-                      value={(editIngredient.last_price ?? ing.last_price ?? '') as any}
-                      onChange={e => setEditIngredient({ ...editIngredient, last_price: Number(e.target.value) })}
-                    />
-                  </td>
-                  <td>
-                    <Button onClick={() => updateIngredient(ing.id)}>Zapisz</Button>
-                    <Button onClick={() => setEditingId(null)}>Anuluj</Button>
-                  </td>
-                </>
-              ) : (
-                <>
-                  <td>{ing.name}</td>
-                  <td>{ing.category}</td>
-                  <td>{ing.base_unit}</td>
-                  <td>{ing.min_threshold}</td>
-                  <td>{ing.last_price}</td>
-                  <td>
-                    <Button onClick={() => { setEditingId(ing.id); setEditIngredient(ing); }}>Edytuj</Button>
-                    <Button onClick={() => deleteIngredient(ing.id)}>Usuń</Button>
-                  </td>
-                </>
-              )}
-            </tr>
+            <Card key={ing.id} className="border-0 shadow-sm hover:shadow-md transition-shadow">
+              <CardContent className="pt-6">
+                {editingId === ing.id ? (
+                  // Edit Mode
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label className="text-sm font-semibold">Nazwa</Label>
+                        <Input 
+                          value={editIngredient.name || ing.name} 
+                          onChange={e => setEditIngredient({ ...editIngredient, name: e.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-semibold">Kategoria</Label>
+                        <select 
+                          value={editIngredient.category || ing.category}
+                          onChange={e => setEditIngredient({ ...editIngredient, category: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                        >
+                          {INGREDIENT_CATEGORIES.map(cat => (
+                            <option key={cat} value={cat}>{cat}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-semibold">Jednostka</Label>
+                        <select 
+                          value={editIngredient.base_unit || ing.base_unit}
+                          onChange={e => setEditIngredient({ ...editIngredient, base_unit: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                        >
+                          {INGREDIENT_UNITS.map(u => (
+                            <option key={u} value={u}>{u}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-semibold">Min próg</Label>
+                        <Input
+                          type="number"
+                          value={(editIngredient.min_threshold ?? ing.min_threshold ?? '') as any}
+                          onChange={e => setEditIngredient({ ...editIngredient, min_threshold: Number(e.target.value) })}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-semibold">Cena</Label>
+                        <Input
+                          type="number"
+                          value={(editIngredient.last_price ?? ing.last_price ?? '') as any}
+                          onChange={e => setEditIngredient({ ...editIngredient, last_price: Number(e.target.value) })}
+                        />
+                      </div>
+                    </div>
+                    <div className="flex gap-3 pt-4 border-t">
+                      <Button 
+                        onClick={() => updateIngredient(ing.id)}
+                        className="bg-green-600 hover:bg-green-700"
+                        size="sm"
+                      >
+                        <CheckCircle className="w-4 h-4 mr-2" />Zapisz
+                      </Button>
+                      <Button 
+                        onClick={() => setEditingId(null)}
+                        variant="outline"
+                        size="sm"
+                      >
+                        Anuluj
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  // View Mode
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-2">{ing.name}</h3>
+                      <div className="grid grid-cols-4 gap-6 text-sm">
+                        <div>
+                          <p className="text-gray-500 text-xs uppercase tracking-wide">Kategoria</p>
+                          <p className="text-gray-900 font-medium mt-1">{ing.category}</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-500 text-xs uppercase tracking-wide">Jednostka</p>
+                          <p className="text-gray-900 font-medium mt-1">{ing.base_unit}</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-500 text-xs uppercase tracking-wide">Min próg</p>
+                          <p className="text-gray-900 font-medium mt-1">{ing.min_threshold || '—'}</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-500 text-xs uppercase tracking-wide">Cena</p>
+                          <p className="text-gray-900 font-semibold mt-1 text-lg">{ing.last_price ? `${ing.last_price.toFixed(2)} zł` : '—'}</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 ml-6">
+                      <Button 
+                        onClick={() => { setEditingId(ing.id); setEditIngredient(ing); }}
+                        variant="outline"
+                        size="sm"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </Button>
+                      <Button 
+                        onClick={() => deleteIngredient(ing.id)}
+                        variant="destructive"
+                        size="sm"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           ))}
-        </tbody>
-      </table>
-      <div className="mb-4">
-        <h3 className="font-semibold mb-2">Dodaj składnik</h3>
-        <div className="flex gap-2">
-          <Input placeholder="Nazwa" value={newIngredient.name} onChange={e => setNewIngredient({ ...newIngredient, name: e.target.value })} />
-          <select value={newIngredient.category} onChange={e => setNewIngredient({ ...newIngredient, category: e.target.value })}>
-            <option value="">Kategoria</option>
-            {INGREDIENT_CATEGORIES.map(cat => (
-              <option key={cat} value={cat}>{cat}</option>
-            ))}
-          </select>
-          <select value={newIngredient.base_unit} onChange={e => setNewIngredient({ ...newIngredient, base_unit: e.target.value })}>
-            <option value="">Jednostka</option>
-            {INGREDIENT_UNITS.map(u => (
-              <option key={u} value={u}>{u}</option>
-            ))}
-          </select>
-          <Input placeholder="Min próg" value={newIngredient.min_threshold} onChange={e => setNewIngredient({ ...newIngredient, min_threshold: e.target.value })} />
-          <Input placeholder="Cena" value={newIngredient.last_price} onChange={e => setNewIngredient({ ...newIngredient, last_price: e.target.value })} />
-          <Button onClick={addIngredient}>Dodaj</Button>
         </div>
-      </div>
+      )}
+
+      {/* Add Ingredient Form */}
+      <Card className="border-0 shadow-md bg-gradient-to-br from-blue-50 to-indigo-50">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Plus className="w-5 h-5" />
+            Dodaj nowy składnik
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Nazwa *</Label>
+                <Input 
+                  placeholder="np. Śmietana" 
+                  value={newIngredient.name} 
+                  onChange={e => setNewIngredient({ ...newIngredient, name: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Kategoria *</Label>
+                <select 
+                  value={newIngredient.category} 
+                  onChange={e => setNewIngredient({ ...newIngredient, category: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white"
+                >
+                  <option value="">Wybierz</option>
+                  {INGREDIENT_CATEGORIES.map(cat => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Jednostka *</Label>
+                <select 
+                  value={newIngredient.base_unit} 
+                  onChange={e => setNewIngredient({ ...newIngredient, base_unit: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white"
+                >
+                  <option value="">Wybierz</option>
+                  {INGREDIENT_UNITS.map(u => (
+                    <option key={u} value={u}>{u}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Min próg</Label>
+                <Input 
+                  type="number"
+                  placeholder="0" 
+                  value={newIngredient.min_threshold} 
+                  onChange={e => setNewIngredient({ ...newIngredient, min_threshold: e.target.value })} 
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Cena (zł)</Label>
+                <Input 
+                  type="number"
+                  placeholder="0.00" 
+                  value={newIngredient.last_price} 
+                  onChange={e => setNewIngredient({ ...newIngredient, last_price: e.target.value })} 
+                />
+              </div>
+              <div className="flex items-end">
+                <Button 
+                  onClick={addIngredient}
+                  className="w-full bg-blue-600 hover:bg-blue-700"
+                >
+                  <Plus className="w-4 h-4 mr-2" />Dodaj
+                </Button>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </section>
   );
 }
@@ -2151,10 +2308,7 @@ export default function AdminDashboard() {
         {/*  INGREDIENTS MANAGEMENT                                */}
         {/* ═══════════════════════════════════════════════════════ */}
         {activeView === 'ingredients' && (
-          <div>
-            <h1 className="text-3xl font-bold mb-6">Składniki</h1>
-            <IngredientsSection supabase={supabase} />
-          </div>
+          <IngredientsSection supabase={supabase} />
         )}
 
         {/* ═══════════════════════════════════════════════════════ */}
