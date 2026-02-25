@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import {
   LayoutDashboard, FileText, Receipt, ClipboardList, Package,
   Calendar, RefreshCw, Lock, BarChart3, History, FileSpreadsheet,
-  LogOut, Bell, CheckSquare, Users
+  LogOut, Bell, CheckSquare, DollarSign, AlertTriangle, Truck
 } from 'lucide-react'
 
 type SidebarProps = {
@@ -41,6 +41,21 @@ export function Sidebar({
       ],
     },
     {
+      label: 'Receptury i Menu',
+      items: [
+        { key: 'ingredients', label: 'Składniki', icon: FileText },
+        { key: 'dishes', label: 'Dania i receptury', icon: ClipboardList },
+        { key: 'menu_calculator', label: 'Kalkulator Ceny', icon: DollarSign },
+        { key: 'menu_pricing', label: 'Wycena Menu', icon: BarChart3 },
+      ],
+    },
+    {
+      label: 'Produkty magazynowe',
+      items: [
+        { key: 'products', label: 'Lista produktów', icon: Package },
+      ],
+    },
+    {
       label: 'Zatwierdzenia',
       items: [
         { key: 'daily_reports', label: 'Raporty dzienne', icon: FileText },
@@ -50,9 +65,15 @@ export function Sidebar({
       ],
     },
     {
+      label: 'Magazyn Centralny',
+      items: [
+        { key: 'central_warehouse', label: 'Stan Magazynu', icon: Truck },
+        { key: 'warehouse_deviations', label: 'Odchylenia', icon: AlertTriangle },
+      ],
+    },
+    {
       label: 'Inwentaryzacja',
       items: [
-        { key: 'products', label: 'Produkty', icon: Package },
         { key: 'monthly', label: 'Miesięczna', icon: Calendar },
         { key: 'weekly', label: 'Tygodniowa', icon: ClipboardList },
       ],

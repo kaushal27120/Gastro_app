@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react'
 import { createClient } from '../supabase-client'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { useRouter } from 'next/navigation'
 import { Sidebar } from '@/components/Sidebar'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -9,21 +10,230 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
-  Calendar, Filter, MapPin, AlertTriangle, CheckCircle, Plus, Trash2,
-  Save, Search, Eye, Send, ArrowLeft, Package, ClipboardList, BarChart3,
-  Lock, RefreshCw, FileSpreadsheet, Loader2, CheckCircle2, XCircle,
-  AlertOctagon, HelpCircle, ChevronRight, Edit2, ToggleLeft, ToggleRight,
-  Clock, TrendingUp, AlertCircle, FileText, Receipt, Download, Bell,
-  Users, Building2, DollarSign, TrendingDown, Minus, ThumbsUp, ThumbsDown,
-  MessageSquare, ExternalLink, ImageIcon
+  Calendar, MapPin, AlertTriangle, CheckCircle, Plus, Trash2,
+  Save, Search, Eye, Send, ArrowLeft, ClipboardList, BarChart3,
+  Lock, RefreshCw, Loader2, XCircle,
+  ChevronRight, Edit2, ToggleLeft, ToggleRight,
+  Clock, TrendingUp, AlertCircle, FileText, Receipt, Bell,
+  ThumbsUp, ThumbsDown, ExternalLink, ImageIcon
 } from 'lucide-react'
-import * as XLSX from 'xlsx'        
+import { MenuPricingTable } from '@/components/menu-pricing-table'
+import { MenuPriceCalculator } from '@/components/menu-price-calculator'
+import { WarehouseDeviationReport } from '@/components/warehouse-deviation-report'
+import { CentralWarehousePanel } from '@/components/central-warehouse-panel'        
+import { DishesManager } from '@/components/dishes-manager'
+
+
+// ================= Ingredients DB =================
+const INGREDIENT_CATEGORIES = [
+  'drinks', 'meat', 'dairy', 'vegetables', 'dry', 'packaging', 'other'
+];
+const INGREDIENT_UNITS = ['kg', 'g', 'l', 'ml', 'pcs', 'pack'];
+
+type Ingredient = {
+  id: string
+  name: string
+  category: string
+  base_unit: string
+  min_threshold?: number | null
+  last_price?: number | null
+}
+
+function IngredientsSection({ supabase }: { supabase: SupabaseClient }) {
+  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+  const [search, setSearch] = useState<string>("");
+  const [categoryFilter, setCategoryFilter] = useState<string>("");
+  const [sortBy, setSortBy] = useState<string>("name");
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [newIngredient, setNewIngredient] = useState<Partial<Record<"name"|"category"|"base_unit"|"min_threshold"|"last_price", string>>>({
+    name: "",
+    category: "",
+    base_unit: "",
+    min_threshold: "",
+    last_price: ""
+  });
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editIngredient, setEditIngredient] = useState<Partial<Ingredient>>({});
+
+  useEffect(() => {
+    fetchIngredients();
+    // eslint-disable-next-line
+  }, [search, categoryFilter, sortBy, sortDir]);
+
+  async function fetchIngredients() {
+    let query = supabase.from("ingredients").select("id,name,category,base_unit,min_threshold,last_price");
+    if (search) query = query.ilike("name", `%${search}%`);
+    if (categoryFilter) query = query.eq("category", categoryFilter);
+    query = query.order(sortBy, { ascending: sortDir === "asc" });
+    const { data } = await query;
+    setIngredients(data || []);
+  }
+
+  async function addIngredient() {
+    const { name, category, base_unit, min_threshold, last_price } = newIngredient;
+    if (!name || !category || !base_unit) return;
+    const { data: inserted, error } = await supabase.from("ingredients").insert([
+      { name, category, base_unit, min_threshold: Number(min_threshold) || null, last_price: Number(last_price) || 0 }
+    ]).select();
+
+    if (error) {
+      alert('Błąd: ' + error.message);
+      return;
+    }
+
+    const ingredientId = inserted?.[0]?.id;
+    if (ingredientId && last_price) {
+      await supabase.from('ingredient_prices_history').insert([
+        { ingredient_id: ingredientId, price: Number(last_price), unit: base_unit }
+      ]);
+    }
+
+    setNewIngredient({ name: "", category: "", base_unit: "", min_threshold: "", last_price: "" });
+    fetchIngredients();
+  }
+
+  async function updateIngredient(id: string) {
+    const { data: updated, error } = await supabase
+      .from("ingredients")
+      .update(editIngredient)
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) {
+      alert('Błąd: ' + error.message);
+      return;
+    }
+
+    if (editIngredient.last_price !== undefined && updated?.id) {
+      const unit = editIngredient.base_unit || updated.base_unit || 'kg';
+      await supabase.from('ingredient_prices_history').insert([
+        { ingredient_id: updated.id, price: Number(editIngredient.last_price), unit }
+      ]);
+    }
+
+    setEditingId(null);
+    setEditIngredient({});
+    fetchIngredients();
+  }
+
+  async function deleteIngredient(id: string) {
+    await supabase.from("ingredients").delete().eq("id", id);
+    fetchIngredients();
+  }
+
+  return (
+    <section className="my-8">
+      <h2 className="text-xl font-bold mb-4">Baza danych ingredientów</h2>
+      <div className="flex gap-2 mb-2">
+        <Input
+          placeholder="Wyszukaj ingredienty..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+        <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}>
+          <option value="">Wszystkie kategorie</option>
+          {INGREDIENT_CATEGORIES.map(cat => (
+            <option key={cat} value={cat}>{cat}</option>
+          ))}
+        </select>
+        <Button onClick={() => setSortBy("name")}>Sortuj po nazwie</Button>
+          <Button onClick={() => setSortBy("last_price")}>Sortuj po cenie</Button>
+      </div>
+      <table className="w-full border mb-4">
+        <thead>
+          <tr>
+            <th>Nazwa</th>
+            <th>Kategoria</th>
+            <th>Jednostka</th>
+            <th>Min próg</th>
+            <th>Cena</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ingredients.map(ing => (
+            <tr key={ing.id}>
+              {editingId === ing.id ? (
+                <>
+                  <td><Input value={editIngredient.name || ing.name} onChange={e => setEditIngredient({ ...editIngredient, name: e.target.value })} /></td>
+                  <td>
+                    <select value={editIngredient.category || ing.category} onChange={e => setEditIngredient({ ...editIngredient, category: e.target.value })}>
+                      {INGREDIENT_CATEGORIES.map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <select value={editIngredient.base_unit || ing.base_unit} onChange={e => setEditIngredient({ ...editIngredient, base_unit: e.target.value })}>
+                      {INGREDIENT_UNITS.map(u => (
+                        <option key={u} value={u}>{u}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <Input
+                      value={(editIngredient.min_threshold ?? ing.min_threshold ?? '') as any}
+                      onChange={e => setEditIngredient({ ...editIngredient, min_threshold: Number(e.target.value) })}
+                    />
+                  </td>
+                  <td>
+                    <Input
+                      value={(editIngredient.last_price ?? ing.last_price ?? '') as any}
+                      onChange={e => setEditIngredient({ ...editIngredient, last_price: Number(e.target.value) })}
+                    />
+                  </td>
+                  <td>
+                    <Button onClick={() => updateIngredient(ing.id)}>Zapisz</Button>
+                    <Button onClick={() => setEditingId(null)}>Anuluj</Button>
+                  </td>
+                </>
+              ) : (
+                <>
+                  <td>{ing.name}</td>
+                  <td>{ing.category}</td>
+                  <td>{ing.base_unit}</td>
+                  <td>{ing.min_threshold}</td>
+                  <td>{ing.last_price}</td>
+                  <td>
+                    <Button onClick={() => { setEditingId(ing.id); setEditIngredient(ing); }}>Edytuj</Button>
+                    <Button onClick={() => deleteIngredient(ing.id)}>Usuń</Button>
+                  </td>
+                </>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="mb-4">
+        <h3 className="font-semibold mb-2">Dodaj składnik</h3>
+        <div className="flex gap-2">
+          <Input placeholder="Nazwa" value={newIngredient.name} onChange={e => setNewIngredient({ ...newIngredient, name: e.target.value })} />
+          <select value={newIngredient.category} onChange={e => setNewIngredient({ ...newIngredient, category: e.target.value })}>
+            <option value="">Kategoria</option>
+            {INGREDIENT_CATEGORIES.map(cat => (
+              <option key={cat} value={cat}>{cat}</option>
+            ))}
+          </select>
+          <select value={newIngredient.base_unit} onChange={e => setNewIngredient({ ...newIngredient, base_unit: e.target.value })}>
+            <option value="">Jednostka</option>
+            {INGREDIENT_UNITS.map(u => (
+              <option key={u} value={u}>{u}</option>
+            ))}
+          </select>
+          <Input placeholder="Min próg" value={newIngredient.min_threshold} onChange={e => setNewIngredient({ ...newIngredient, min_threshold: e.target.value })} />
+          <Input placeholder="Cena" value={newIngredient.last_price} onChange={e => setNewIngredient({ ...newIngredient, last_price: e.target.value })} />
+          <Button onClick={addIngredient}>Dodaj</Button>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 /* ================================================================== */
 /*  CONSTANTS                                                          */
 /* ================================================================== */
 const VAT_RATE = 0.08
-const LABOR_PLAN_PERCENT = 0.25
 const LABOR_GREEN_MAX = 0.27
 const LABOR_YELLOW_MAX = 0.30
 const GROSS_MARGIN_PLAN_PERCENT = 0.63
@@ -133,14 +343,41 @@ type ClosedMonth = {
   closed_at: string; closed_by: string; location_name?: string
 }
 
+type MenuPricingDish = {
+  id: string
+  name: string
+  category: string
+  productionCost: number
+  menuPrice: number
+  foodCostPct: number
+  marginPerServing: number
+  marginGoal: number
+  marginPct: number
+  status: 'ok' | 'warning' | 'critical'
+}
+
+type MenuCalcDish = {
+  id: string
+  name: string
+  foodCost: number
+  vatRate: number
+  menuPriceNet: number | null
+  menuPriceGross: number | null
+  marginTarget: number | null
+  foodCostTarget: number | null
+  status: string | null
+}
+
 type ActiveView =
   | 'dashboard' | 'pnl' | 'notifications'
   | 'daily_reports' | 'daily_report_detail'
   | 'approvals' | 'inv_approvals' | 'inv_review'
   | 'semis_verification'
-  | 'products' | 'monthly' | 'weekly'
+  | 'products' | 'ingredients' | 'dishes' | 'monthly' | 'weekly'
   | 'monthclose'
   | 'reports' | 'history' | 'imported'
+  | 'menu_pricing' | 'menu_calculator' | 'warehouse_deviations'
+  | 'central_warehouse'
 
 /* ================================================================== */
 /*  HELPERS                                                            */
@@ -204,6 +441,8 @@ export default function AdminDashboard() {
   // ── Notifications ──
   const [notifications, setNotifications] = useState<AdminNotification[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
+  const [dbAlerts, setDbAlerts] = useState<any[]>([])
+  const [pendingInvTxs, setPendingInvTxs] = useState<any[]>([])
 
   // ── Daily Reports ──
   const [pendingDailyReports, setPendingDailyReports] = useState<DailyReport[]>([])
@@ -236,6 +475,16 @@ export default function AdminDashboard() {
   const [newProduct, setNewProduct] = useState({ name: '', unit: 'kg', category: 'inne', is_food: true, last_price: '' })
   const [showAddProduct, setShowAddProduct] = useState(false)
   const [productSaving, setProductSaving] = useState(false)
+
+  // ── Menu Pricing Dishes ──
+  const [menuPricingDishes, setMenuPricingDishes] = useState<MenuPricingDish[]>([])
+  const [menuPricingLoading, setMenuPricingLoading] = useState(false)
+
+  // ── Menu Calculator ──
+  const [menuCalcDishes, setMenuCalcDishes] = useState<MenuCalcDish[]>([])
+  const [menuCalcLoading, setMenuCalcLoading] = useState(false)
+  const [selectedCalcDishId, setSelectedCalcDishId] = useState<string>('')
+  const [menuCalcSaving, setMenuCalcSaving] = useState(false)
 
   // ── Inventory Jobs ──
   const [submittedJobs, setSubmittedJobs] = useState<InventoryJob[]>([])
@@ -334,6 +583,53 @@ export default function AdminDashboard() {
     
     return () => { supabase.removeChannel(channel) }
   }, [supabase])
+
+  // Fetch alerts from `alerts` table
+  const fetchAlerts = async () => {
+    const { data } = await supabase.from('alerts').select('*').order('created_at', { ascending: false }).limit(100)
+    if (data) setDbAlerts(data)
+  }
+
+  // Fetch recent inventory transactions (pending review)
+  const fetchPendingInvTxs = async () => {
+    const { data } = await supabase.from('inventory_transactions')
+      .select('*, ingredients(name, unit)')
+      .order('created_at', { ascending: false })
+      .limit(200)
+    if (data) setPendingInvTxs(data)
+  }
+
+  useEffect(() => {
+    fetchAlerts(); fetchPendingInvTxs()
+    const ch1 = supabase
+      .channel('alerts')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'alerts' }, fetchAlerts)
+      .subscribe()
+    const ch2 = supabase
+      .channel('inv_tx')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'inventory_transactions' }, fetchPendingInvTxs)
+      .subscribe()
+    return () => { supabase.removeChannel(ch1); supabase.removeChannel(ch2) }
+  }, [supabase])
+
+  const markAlertStatus = async (id: string, status: string) => {
+    await supabase.from('alerts').update({ status }).eq('id', id)
+    fetchAlerts()
+  }
+
+  const createInvNotification = async (tx: any) => {
+    await supabase.from('admin_notifications').insert({
+      type: 'inventory',
+      location_id: tx.location_id,
+      company_id: companyId,
+      title: `Review inventory tx - ${tx.id}`,
+      message: `Inventory tx for ${tx.ingredient_id || tx.ingredients?.name || 'unknown'}: ${tx.quantity} ${tx.unit} @ ${tx.price}`,
+      reference_id: tx.id,
+      status: 'unread',
+      created_by: adminId,
+    })
+    fetchNotifications()
+  }
 
   const markNotificationRead = async (id: string) => {
     await supabase.from('admin_notifications')
@@ -672,6 +968,142 @@ export default function AdminDashboard() {
   }
   useEffect(() => { fetchProducts() }, [])
 
+  useEffect(() => {
+    if (activeView === 'menu_pricing') {
+      fetchMenuPricingDishes()
+    }
+  }, [activeView])
+
+  useEffect(() => {
+    if (activeView === 'menu_calculator') {
+      fetchMenuCalcDishes()
+    }
+  }, [activeView])
+
+  // ── Fetch menu pricing dishes ──
+  const fetchMenuPricingDishes = async () => {
+    setMenuPricingLoading(true)
+    const { data } = await supabase
+      .from('dishes')
+      .select('id, dish_name, menu_price_gross, menu_price_net, margin_target, status, recipe_id, recipes(category)')
+      .order('dish_name')
+
+    const rows = data || []
+    const mapped = await Promise.all(
+      rows.map(async (d: any) => {
+        let foodCost = 0
+        try {
+          const { data: costData } = await supabase.rpc('calculate_dish_foodcost', { dish_id_param: d.id })
+          foodCost = Number(costData || 0)
+        } catch {
+          foodCost = 0
+        }
+
+        const price = Number(d.menu_price_gross ?? d.menu_price_net ?? 0)
+        const foodCostPct = price > 0 ? (foodCost / price) * 100 : 0
+        const marginPct = price > 0 ? ((price - foodCost) / price) * 100 : 0
+        const marginPerServing = price - foodCost
+        const marginGoal = Number(d.margin_target ?? 0.7) * 100
+        let status: 'ok' | 'warning' | 'critical' = 'ok'
+        if (foodCostPct > 35) status = 'warning'
+        if (foodCostPct > 40) status = 'critical'
+
+        return {
+          id: d.id,
+          name: d.dish_name,
+          category: d.recipes?.category || 'Uncategorized',
+          productionCost: Number(foodCost.toFixed(2)),
+          menuPrice: Number(price.toFixed(2)),
+          foodCostPct: Number(foodCostPct.toFixed(1)),
+          marginPerServing: Number(marginPerServing.toFixed(2)),
+          marginGoal: Number(marginGoal.toFixed(0)),
+          marginPct: Number(marginPct.toFixed(1)),
+          status,
+        } as MenuPricingDish
+      })
+    )
+
+    setMenuPricingDishes(mapped)
+    setMenuPricingLoading(false)
+  }
+
+  const fetchMenuCalcDishes = async () => {
+    setMenuCalcLoading(true)
+    const { data } = await supabase
+      .from('dishes')
+      .select('id, dish_name, vat_rate, menu_price_net, menu_price_gross, margin_target, food_cost_target, status, recipe_id')
+      .order('dish_name')
+
+    const rows = data || []
+    const mapped = await Promise.all(
+      rows.map(async (d: any) => {
+        let foodCost = 0
+        try {
+          const { data: costData, error: rpcError } = await supabase.rpc('calculate_dish_foodcost', { dish_id_param: d.id })
+          if (rpcError) {
+            console.error(`RPC error for dish ${d.id}:`, rpcError)
+          }
+          // Handle both scalar and object responses from RPC
+          if (costData !== null && costData !== undefined) {
+            foodCost = typeof costData === 'object' ? Number(costData.total || costData.food_cost || 0) : Number(costData)
+          }
+          console.log(`Dish ${d.id} (${d.dish_name}): foodCost=${foodCost}`)
+        } catch (err) {
+          console.error(`Exception calculating foodcost for ${d.id}:`, err)
+          foodCost = 0
+        }
+
+        return {
+          id: d.id,
+          name: d.dish_name,
+          foodCost: Number(foodCost.toFixed(2)),
+          vatRate: Number(d.vat_rate ?? 8),
+          menuPriceNet: Number(d.menu_price_net || 0),
+          menuPriceGross: Number(d.menu_price_gross || 0),
+          marginTarget: Number(d.margin_target || 0.7),
+          foodCostTarget: Number(d.food_cost_target || 0.3),
+          status: d.status || 'active',
+        } as MenuCalcDish
+      })
+    )
+
+    setMenuCalcDishes(mapped)
+    if (mapped.length && !selectedCalcDishId) {
+      setSelectedCalcDishId(mapped[0].id)
+    }
+    setMenuCalcLoading(false)
+  }
+
+  const saveMenuCalcPrice = async (dishId: string, grossPrice: number, marginTarget: number, vatRate: number) => {
+    if (!dishId) return
+    setMenuCalcSaving(true)
+    try {
+      const menuPriceGross = Number(grossPrice) || 0
+      const menuPriceNet = menuPriceGross > 0 ? menuPriceGross / (1 + vatRate / 100) : 0
+      const { error } = await supabase
+        .from('dishes')
+        .update({
+          menu_price_gross: menuPriceGross,
+          menu_price_net: menuPriceNet,
+          margin_target: marginTarget,
+        })
+        .eq('id', dishId)
+
+      if (error) {
+        alert('Błąd: ' + error.message)
+        return
+      }
+
+      setMenuCalcDishes(prev => prev.map(d => (
+        d.id === dishId
+          ? { ...d, menuPriceGross, menuPriceNet, marginTarget }
+          : d
+      )))
+    } finally {
+      setMenuCalcSaving(false)
+    }
+  }
+
   const filteredProducts = useMemo(() => {
     let items = inventoryProducts
     if (productSearch) { const q = productSearch.toLowerCase(); items = items.filter(p => p.name.toLowerCase().includes(q)) }
@@ -723,10 +1155,20 @@ export default function AdminDashboard() {
   // ═══════════════════════════════════════════════════════════════════
   const fetchExistingMonthly = async () => {
     if (!monthlyMonth) return
-    const [y, m] = monthlyMonth.split('-').map(Number)
-    const due = new Date(y, m, 0).toISOString().split('T')[0]
-    const { data } = await supabase.from('inventory_jobs').select('*, locations:location_id(name)').eq('type', 'MONTHLY').eq('due_date', due)
-    if (data) setExistingMonthlyJobs(data.map((j: any) => ({ ...j, location_name: j.locations?.name || '?' })))
+    try {
+      const [y, m] = monthlyMonth.split('-').map(Number)
+      const due = new Date(y, m, 0).toISOString().split('T')[0]
+      const { data, error } = await supabase.from('inventory_jobs').select('*, locations:location_id(name)').eq('type', 'MONTHLY').eq('due_date', due)
+      if (error) {
+        console.warn('⚠️ Warning fetching monthly jobs:', error)
+        setExistingMonthlyJobs([])
+        return
+      }
+      if (data) setExistingMonthlyJobs(data.map((j: any) => ({ ...j, location_name: j.locations?.name || '?' })))
+    } catch (err) {
+      console.error('❌ Error in fetchExistingMonthly:', err)
+      setExistingMonthlyJobs([])
+    }
   }
   useEffect(() => { fetchExistingMonthly() }, [monthlyMonth])
 
@@ -807,7 +1249,7 @@ export default function AdminDashboard() {
 
       // Fetch location names separately (handles missing FK relationships)
       const locIds = Array.from(new Set(data.map((j: any) => j.location_id).filter(Boolean)))
-      let locMap: Record<string, string> = {}
+      const locMap: Record<string, string> = {}
       if (locIds.length) {
         const { data: locs, error: locErr } = await supabase.from('locations').select('id, name').in('id', locIds)
         if (!locErr && locs) locs.forEach((l: any) => { locMap[l.id] = l.name })
@@ -840,7 +1282,7 @@ export default function AdminDashboard() {
       
       if (data) {
         const locIds = Array.from(new Set(data.map((j: any) => j.location_id).filter(Boolean)))
-        let locMap: Record<string, string> = {}
+        const locMap: Record<string, string> = {}
         if (locIds.length) {
           const { data: locs, error: locErr } = await supabase.from('locations').select('id, name').in('id', locIds)
           if (!locErr && locs) locs.forEach((l: any) => { locMap[l.id] = l.name })
@@ -1180,6 +1622,62 @@ export default function AdminDashboard() {
                 )}
               </CardContent>
             </Card>
+            <div className="grid grid-cols-2 gap-4 mt-4">
+              <Card>
+                <CardHeader><CardTitle className="text-sm">DB Alerts</CardTitle></CardHeader>
+                <CardContent>
+                  {dbAlerts.length === 0 ? (
+                    <p className="text-center text-slate-400 py-6">Brak alertów z bazy</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {dbAlerts.map(a => (
+                        <div key={a.id} className="flex items-start justify-between gap-3 p-3 border rounded">
+                          <div>
+                            <p className="font-semibold">{a.title}</p>
+                            <p className="text-sm text-slate-500">{a.message}</p>
+                            <p className="text-xs text-slate-400 mt-1">{a.location_id || 'global'} • {new Date(a.created_at).toLocaleString('pl-PL')}</p>
+                          </div>
+                          <div className="flex flex-col items-end gap-2">
+                            <span className="text-xs text-slate-500 mb-1">{a.status}</span>
+                            <div className="flex gap-2">
+                              {a.status === 'unread' && <Button size="sm" variant="ghost" onClick={() => markAlertStatus(a.id, 'read')}>Mark read</Button>}
+                              <Button size="sm" onClick={() => markAlertStatus(a.id, 'actioned')}>Actioned</Button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="flex items-center justify-between"><CardTitle className="text-sm">Pending Inventory Transactions</CardTitle>
+                  <div><Button size="sm" variant="ghost" onClick={() => fetchPendingInvTxs()}>Refresh</Button></div></CardHeader>
+                <CardContent>
+                  {pendingInvTxs.length === 0 ? (
+                    <p className="text-center text-slate-400 py-6">Brak ostatnich transakcji</p>
+                  ) : (
+                    <div className="overflow-auto max-h-80">
+                      <table className="w-full text-sm"><thead><tr className="text-left text-xs text-slate-500 border-b"><th className="p-2">Ingredient</th><th>Qty</th><th>Unit</th><th>Price</th><th>Location</th><th></th></tr></thead>
+                        <tbody>
+                          {pendingInvTxs.map(tx => (
+                            <tr key={tx.id} className="border-b">
+                              <td className="p-2">{tx.ingredients?.name || tx.ingredient_id}</td>
+                              <td className="p-2">{tx.quantity}</td>
+                              <td className="p-2">{tx.unit}</td>
+                              <td className="p-2">{tx.price ? `${tx.price}` : '—'}</td>
+                              <td className="p-2">{tx.location_id || '—'}</td>
+                              <td className="p-2 text-right"><Button size="sm" onClick={() => createInvNotification(tx)}>Create Review</Button></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
           </div>
         )}
 
@@ -1650,6 +2148,26 @@ export default function AdminDashboard() {
         )}
 
         {/* ═══════════════════════════════════════════════════════ */}
+        {/*  INGREDIENTS MANAGEMENT                                */}
+        {/* ═══════════════════════════════════════════════════════ */}
+        {activeView === 'ingredients' && (
+          <div>
+            <h1 className="text-3xl font-bold mb-6">Składniki</h1>
+            <IngredientsSection supabase={supabase} />
+          </div>
+        )}
+
+        {/* ═══════════════════════════════════════════════════════ */}
+        {/*  DISHES & RECIPES MANAGEMENT                           */}
+        {/* ═══════════════════════════════════════════════════════ */}
+        {activeView === 'dishes' && (
+          <div>
+            <h1 className="text-3xl font-bold mb-6">Dania i receptury</h1>
+            <DishesManager supabase={supabase} />
+          </div>
+        )}
+
+        {/* ═══════════════════════════════════════════════════════ */}
         {/*  MONTHLY GENERATOR                                     */}
         {/* ═══════════════════════════════════════════════════════ */}
         {activeView === 'monthly' && (
@@ -2041,6 +2559,171 @@ export default function AdminDashboard() {
                 ))}
               </tbody></table>
             </CardContent></Card>
+          </div>
+        )}
+
+        {/* ═══════════════════════════════════════════════════════ */}
+        {/*  MENU PRICING CALCULATOR                               */}
+        {/* ═══════════════════════════════════════════════════════ */}
+        {activeView === 'menu_calculator' && (
+          <div>
+            <h1 className="text-3xl font-bold mb-6">💰 Kalkulator Ceny Menu</h1>
+            <Card className="mb-4">
+              <CardContent className="pt-4">
+                <div className="grid grid-cols-3 gap-3 items-end">
+                  <div className="col-span-2">
+                    <Label className="text-sm">Wybierz danie</Label>
+                    <select
+                      className="w-full h-10 rounded-md border border-input px-3 text-sm"
+                      value={selectedCalcDishId}
+                      onChange={(e) => setSelectedCalcDishId(e.target.value)}
+                    >
+                      {menuCalcDishes.map(d => (
+                        <option key={d.id} value={d.id}>{d.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <Button variant="outline" onClick={fetchMenuCalcDishes} disabled={menuCalcLoading}>
+                      {menuCalcLoading ? 'Ładowanie…' : 'Odśwież'}
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {(() => {
+              const dish = menuCalcDishes.find(d => d.id === selectedCalcDishId)
+              if (!dish) {
+                return <div className="text-sm text-slate-500">Brak dań do wyceny.</div>
+              }
+              
+              const menuPriceGross = dish.menuPriceGross ?? 0
+              const menuPriceNet = dish.menuPriceNet ?? 0
+              const marginTarget = dish.marginTarget ?? 0.7
+              const foodCostTarget = dish.foodCostTarget ?? 0.3
+              const currentMarginPct = menuPriceGross > 0 ? ((menuPriceGross - dish.foodCost) / menuPriceGross) * 100 : 0
+              const currentFoodCostPct = menuPriceGross > 0 ? (dish.foodCost / menuPriceGross) * 100 : 0
+              const marginTargetPct = marginTarget * 100
+              const foodCostTargetPct = foodCostTarget * 100
+              
+              return (
+                <>
+                  <Card className="mb-4 bg-slate-50">
+                    <CardContent className="pt-4">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="border-l-4 border-blue-500 pl-3">
+                          <div className="text-xs text-slate-600">Koszt produkcji</div>
+                          <div className="text-lg font-bold text-blue-600">{dish.foodCost.toFixed(2)} zł</div>
+                        </div>
+                        <div className="border-l-4 border-green-500 pl-3">
+                          <div className="text-xs text-slate-600">Obecna cena netto</div>
+                          <div className="text-lg font-bold text-green-600">{menuPriceNet.toFixed(2)} zł</div>
+                        </div>
+                        <div className="border-l-4 border-purple-500 pl-3">
+                          <div className="text-xs text-slate-600">Obecna cena brutto</div>
+                          <div className="text-lg font-bold text-purple-600">{menuPriceGross.toFixed(2)} zł</div>
+                        </div>
+                        <div className="border-l-4 border-orange-500 pl-3">
+                          <div className="text-xs text-slate-600">VAT {dish.vatRate}%</div>
+                          <div className="text-lg font-bold text-orange-600">{(menuPriceGross - menuPriceNet).toFixed(2)} zł</div>
+                        </div>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 pt-4 border-t">
+                        <div>
+                          <div className="text-xs text-slate-600 mb-2">Koszt produkcji %</div>
+                          <div className="flex items-center gap-2">
+                            <div className="text-sm font-semibold">{currentFoodCostPct.toFixed(1)}%</div>
+                            <div className="text-xs text-slate-500">Cel: {foodCostTargetPct.toFixed(0)}%</div>
+                          </div>
+                          <div className={`text-xs mt-1 ${currentFoodCostPct <= foodCostTargetPct ? 'text-green-600' : currentFoodCostPct <= foodCostTargetPct + 5 ? 'text-yellow-600' : 'text-red-600'}`}>
+                            {currentFoodCostPct <= foodCostTargetPct ? '✓ OK' : currentFoodCostPct <= foodCostTargetPct + 5 ? '⚠ Ostrzeżenie' : '✗ Przekroczenie'}
+                          </div>
+                        </div>
+                        
+                        <div>
+                          <div className="text-xs text-slate-600 mb-2">Marża %</div>
+                          <div className="flex items-center gap-2">
+                            <div className="text-sm font-semibold">{currentMarginPct.toFixed(1)}%</div>
+                            <div className="text-xs text-slate-500">Cel: {marginTargetPct.toFixed(0)}%</div>
+                          </div>
+                          <div className={`text-xs mt-1 ${currentMarginPct >= marginTargetPct ? 'text-green-600' : 'text-red-600'}`}>
+                            {currentMarginPct >= marginTargetPct ? '✓ OK' : '✗ Za niska'}
+                          </div>
+                        </div>
+                        
+                        <div>
+                          <div className="text-xs text-slate-600 mb-2">Status</div>
+                          <div className="text-sm font-semibold capitalize">
+                            {dish.status === 'active' && <span className="text-green-600">Aktywne</span>}
+                            {dish.status === 'inactive' && <span className="text-slate-600">Nieaktywne</span>}
+                            {dish.status === 'draft' && <span className="text-yellow-600">Szkic</span>}
+                          </div>
+                        </div>
+                        
+                        <div>
+                          <div className="text-xs text-slate-600 mb-2">Marża jednostkowa</div>
+                          <div className="text-sm font-semibold text-blue-600">
+                            {(menuPriceGross - dish.foodCost).toFixed(2)} zł
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                  
+                  <MenuPriceCalculator
+                    dishName={dish.name}
+                    foodCost={dish.foodCost}
+                    defaultMarginTarget={marginTarget}
+                    vatRate={dish.vatRate}
+                    saving={menuCalcSaving}
+                    onSavePrice={(price, marginTargetValue) =>
+                      saveMenuCalcPrice(dish.id, price, marginTargetValue, dish.vatRate)
+                    }
+                  />
+                </>
+              )
+            })()}
+          </div>
+        )}
+
+        {/* ═══════════════════════════════════════════════════════ */}
+        {/*  MENU PRICING TABLE                                    */}
+        {/* ═══════════════════════════════════════════════════════ */}
+        {activeView === 'menu_pricing' && (
+          <div>
+            <h1 className="text-3xl font-bold mb-6">📊 Przegląd wyceny menu</h1>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mb-4"
+              onClick={fetchMenuPricingDishes}
+              disabled={menuPricingLoading}
+            >
+              {menuPricingLoading ? 'Ładowanie…' : 'Odśwież dane'}
+            </Button>
+            <MenuPricingTable dishes={menuPricingDishes.length ? menuPricingDishes : undefined} />
+          </div>
+        )}
+
+        {/* ═══════════════════════════════════════════════════════ */}
+        {/*  WAREHOUSE DEVIATION REPORT                            */}
+        {/* ═══════════════════════════════════════════════════════ */}
+        {activeView === 'warehouse_deviations' && (
+          <div>
+            <h1 className="text-3xl font-bold mb-6">⚠️ Raport odchyleń magazynu</h1>
+            <WarehouseDeviationReport />
+          </div>
+        )}
+
+        {/* ═══════════════════════════════════════════════════════ */}
+        {/*  CENTRAL WAREHOUSE PANEL                               */}
+        {/* ═══════════════════════════════════════════════════════ */}
+        {activeView === 'central_warehouse' && (
+          <div>
+            <h1 className="text-3xl font-bold mb-6">📦 Zarządzanie magazynem centralnym</h1>
+            <CentralWarehousePanel />
           </div>
         )}
       </main>

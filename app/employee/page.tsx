@@ -36,15 +36,15 @@ export default function EmployeeDashboard() {
     fetchMyShifts()
   }, [router])
 
-  if (loading) return <div className="p-8 text-center">Loading schedule...</div>
+  if (loading) return <div className="p-8 text-center">Wczytywanie harmonogramu...</div>
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-md mx-auto">
         <div className="flex justify-between items-center mb-8">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Hello, {userName} 👋</h1>
-            <p className="text-gray-500">Here is your upcoming schedule.</p>
+            <h1 className="text-2xl font-bold text-gray-900">Cześć, {userName} 👋</h1>
+            <p className="text-gray-500">Oto twój harmonogram.</p>
           </div>
           <Button variant="ghost" size="icon" onClick={() => { supabase.auth.signOut(); router.push('/login') }}>
             <LogOut className="w-5 h-5 text-red-500" />
@@ -55,7 +55,7 @@ export default function EmployeeDashboard() {
           {shifts.length === 0 && (
             <Card>
               <CardContent className="p-8 text-center text-gray-500">
-                You have no upcoming shifts.
+                Nie masz zaplanowanych zmian.
               </CardContent>
             </Card>
           )}

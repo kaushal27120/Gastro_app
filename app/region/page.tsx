@@ -1,11 +1,11 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { createClient } from '../supabase-client'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 
 export default function RegionalDashboard() {
   const supabase = createClient()
-  const [data, setData] = useState<any[]>([])
+  const [data, setData] = useState<Record<string, unknown>[]>([])
 
   useEffect(() => {
     const fetchData = async () => {
@@ -28,11 +28,12 @@ export default function RegionalDashboard() {
        }
     }
     fetchData()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
-      <h1 className="text-2xl font-bold mb-6">🌍 Regional Overview</h1>
+      <h1 className="text-2xl font-bold mb-6">🌍 Przegląd Regionalny</h1>
       <div className="grid gap-4">
         {data.map(item => (
           <Card key={item.id}>

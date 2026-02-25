@@ -20,18 +20,18 @@ export default function FinancePage() {
       <Sidebar />
       <main className="flex-1 ml-64 p-8">
         <header className="mb-8">
-          <h1 className="text-3xl font-bold text-slate-900">Finance & Accounting</h1>
-          <p className="text-slate-500">View all records and payment statuses.</p>
+          <h1 className="text-3xl font-bold text-slate-900">Finanse i Rachunkowość</h1>
+          <p className="text-slate-500">Wyświetl wszystkie rekordy i statusy płatności.</p>
         </header>
         
         <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
           <table className="w-full text-left">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                <th className="p-4 font-semibold text-slate-700 text-sm">Date</th>
-                <th className="p-4 font-semibold text-slate-700 text-sm">Location</th>
-                <th className="p-4 font-semibold text-slate-700 text-sm">Supplier</th>
-                <th className="p-4 font-semibold text-slate-700 text-sm text-right">Amount</th>
+                <th className="p-4 font-semibold text-slate-700 text-sm">Data</th>
+                <th className="p-4 font-semibold text-slate-700 text-sm">Lokalizacja</th>
+                <th className="p-4 font-semibold text-slate-700 text-sm">Dostawca</th>
+                <th className="p-4 font-semibold text-slate-700 text-sm text-right">Kwota</th>
                 <th className="p-4 font-semibold text-slate-700 text-sm">Status</th>
               </tr>
             </thead>

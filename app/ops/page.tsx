@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { OpsSidebar } from '@/components/OpsSidebar'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import IngredientAutocomplete from '@/components/ingredient-autocomplete'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -30,6 +31,7 @@ type ValidationError = { field: string; message: string }
 type InvoiceLineItem = {
   product: string; cosCategory: string; quantity: string
   unit: string; netPrice: string; vatRate: string
+  ingredient_id?: string | null
 }
 type InventoryJob = {
   id: string; location_id: string; type: 'MONTHLY' | 'WEEKLY'
@@ -564,27 +566,65 @@ export default function OpsDashboard() {
     let invoiceId: string | null = null
 
     if (invoiceType === 'COS') {
-      const { data: inv, error: e } = await supabase.from('invoices').insert({
+      const valid = cosLineItems.filter(i => i.product.trim() && Number(i.quantity) > 0 && Number(i.netPrice) > 0)
+      // build payloads for RPC
+      const invoicePayload = {
         location_id: selectedLocation.location_id,
         company_id: selectedLocation.locations.company_id,
         invoice_type: 'COS', supplier_name: invoiceCommon.supplier,
         invoice_number: invoiceCommon.invoiceNumber,
         service_date: invoiceCommon.saleDate, receipt_date: invoiceCommon.receiptDate,
         total_net: cosTotalNet, total_vat: cosTotalVat, total_gross: cosTotalGross,
-        payment_method: 'przelew', attachment_url: attachmentUrl, status: 'submitted',
-      }).select('id').single()
-      if (e) { alert('Błąd: ' + e.message); setUploading(false); return }
-      invoiceId = inv?.id
-      const valid = cosLineItems.filter(i => i.product.trim() && Number(i.quantity) > 0 && Number(i.netPrice) > 0)
-      if (valid.length > 0 && inv) {
-        const items = valid.map((i, idx) => ({
-          invoice_id: inv.id, line_number: idx + 1, product_name: i.product,
-          cos_category: i.cosCategory, quantity: Number(i.quantity), unit: i.unit,
-          net_price: Number(i.netPrice), net_value: getLineNet(i),
-          vat_rate: Number(i.vatRate), gross_value: getLineGross(i),
-        }))
-        await supabase.from('invoice_items').insert(items)
+        payment_method: 'przelew', attachment_url: attachmentUrl, status: 'submitted'
       }
+      const itemsPayload = valid.map((i, idx) => ({
+        line_number: idx + 1,
+        product_name: i.product,
+        cos_category: i.cosCategory,
+        quantity: Number(i.quantity),
+        unit: i.unit,
+        net_price: Number(i.netPrice),
+        net_value: getLineNet(i),
+        vat_rate: Number(i.vatRate),
+        gross_value: getLineGross(i),
+        ingredient_id: (i as any).ingredient_id || ''
+      }))
+
+      const txsPayload = itemsPayload.filter(it => it.ingredient_id).map(it => ({
+        ingredient_id: it.ingredient_id,
+        location_id: selectedLocation.location_id,
+        tx_type: 'invoice_in',
+        quantity: it.quantity,
+        unit: it.unit,
+        price: it.net_price,
+        reason: 'invoice import',
+        created_by: userId,
+        created_at: invoiceCommon.saleDate || new Date().toISOString()
+      }))
+
+      const priceHistoryPayload = itemsPayload.filter(it => it.ingredient_id).map(it => ({
+        ingredient_id: it.ingredient_id,
+        price: it.net_price,
+        unit: it.unit,
+        supplier: invoiceCommon.supplier,
+        invoice_ref: '',
+        recorded_at: invoiceCommon.saleDate || new Date().toISOString()
+      }))
+
+      // Call server-side RPC to perform atomic insert + alerts
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc('process_invoice_with_items_and_txs', {
+        invoice_json: invoicePayload,
+        items_json: itemsPayload,
+        txs_json: txsPayload,
+        price_history_json: priceHistoryPayload,
+        price_change_threshold: 0.1
+      })
+      if (rpcErr) {
+        console.error('RPC error', rpcErr)
+        alert('Błąd zapisu faktury: ' + rpcErr.message)
+        setUploading(false); return
+      }
+      invoiceId = rpcRes?.invoice_id || null
       alert(`✅ Faktura COS zapisana (${valid.length} pozycji)`)
     }
 
@@ -1113,7 +1153,16 @@ export default function OpsDashboard() {
                             <div className="col-span-1">VAT</div><div className="col-span-1 text-right">Brutto</div><div className="col-span-1" /></div>
                           {cosLineItems.map((item, i) => (
                             <div key={i} className="grid grid-cols-12 gap-2 items-center text-sm">
-                              <div className="col-span-2"><Input placeholder="Produkt" value={item.product} onChange={e => updateCosLine(i, 'product', e.target.value)} className="h-9" /></div>
+                              <div className="col-span-2">
+                                <IngredientAutocomplete
+                                  value={item.product}
+                                  onChange={(v) => updateCosLine(i, 'product', v)}
+                                  onSelect={(ing) => {
+                                    // set both product name and ingredient_id
+                                    setCosLineItems(p => { const c = [...p]; c[i] = { ...c[i], product: ing.name, ingredient_id: ing.id }; return c })
+                                  }}
+                                />
+                              </div>
                               <div className="col-span-2"><select value={item.cosCategory} onChange={e => updateCosLine(i, 'cosCategory', e.target.value)}
                                 className={`h-9 w-full rounded-md border ${item.product && !item.cosCategory ? 'border-red-300' : 'border-input'} bg-background px-1 text-xs`}>
                                 <option value="">–</option>{COS_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></div>
@@ -1516,3 +1565,4 @@ export default function OpsDashboard() {
     </div>
   )
 }
+
