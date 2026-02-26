@@ -37,10 +37,6 @@ export default function LoginPage() {
         .eq('id', user.id)
         .maybeSingle()
 
-      if (profileError) {
-        console.error('Error fetching user profile', profileError)
-      }
-
       let role = profile?.role as string | undefined
 
       // If there is no profile/role yet (e.g. fresh user, cleared tables), create a default one
@@ -52,7 +48,8 @@ export default function LoginPage() {
           .single()
 
         if (insertError || !createdProfile?.role) {
-          alert('Error: User has no role assigned and profile could not be created.')
+          const msg = insertError?.message || 'Unknown error while creating user profile.'
+          alert('Error while creating user profile: ' + msg)
           setLoading(false)
           return
         }
