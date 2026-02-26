@@ -30,15 +30,38 @@ export default function LoginPage() {
     }
 
     if (user) {
-      const { data: profile } = await supabase.from('user_profiles').select('role').eq('id', user.id).single()
+      // Try to load the user's profile/role; allow 0 or 1 row without throwing
+      const { data: profile, error: profileError } = await supabase
+        .from('user_profiles')
+        .select('role')
+        .eq('id', user.id)
+        .maybeSingle()
 
-      if (profile && profile.role) {
-        const destination = getDashboardRoute(profile.role)
-        router.push(destination)
-      } else {
-        alert("Error: User has no role assigned.")
-        setLoading(false)
+      if (profileError) {
+        console.error('Error fetching user profile', profileError)
       }
+
+      let role = profile?.role as string | undefined
+
+      // If there is no profile/role yet (e.g. fresh user, cleared tables), create a default one
+      if (!role) {
+        const { data: createdProfile, error: insertError } = await supabase
+          .from('user_profiles')
+          .insert({ id: user.id, role: 'employee' })
+          .select('role')
+          .single()
+
+        if (insertError || !createdProfile?.role) {
+          alert('Error: User has no role assigned and profile could not be created.')
+          setLoading(false)
+          return
+        }
+
+        role = createdProfile.role
+      }
+
+      const destination = getDashboardRoute(role)
+      router.push(destination)
     }
   }
 
