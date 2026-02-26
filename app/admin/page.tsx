@@ -120,40 +120,63 @@ function IngredientsSection({ supabase }: { supabase: SupabaseClient }) {
   async function deleteIngredient(id: string) {
     if (window.confirm('Czy na pewno chcesz usunąć ten składnik?')) {
       try {
-        const { error } = await supabase.from("ingredients").delete().eq("id", id);
+        // Najpierw usuń powiązane transakcje magazynowe, aby nie złamać FK
+        const { error: txError } = await supabase
+          .from('inventory_transactions')
+          .delete()
+          .eq('ingredient_id', id);
+
+        if (txError) throw txError;
+
+        // Następnie usuń powiązane rekordy w przepisach
+        const { error: recipeError } = await supabase
+          .from('recipe_ingredients')
+          .delete()
+          .eq('ingredient_id', id);
+
+        if (recipeError) throw recipeError;
+
+        const { error } = await supabase.from('ingredients').delete().eq('id', id);
         if (error) throw error;
         fetchIngredients();
       } catch (error) {
-        alert('Błąd podczas usuwania: ' + (error instanceof Error ? error.message : String(error)));
+        const message =
+          error instanceof Error
+            ? error.message
+            : (typeof error === 'object' && error && 'message' in error
+                ? // @ts-ignore - Supabase error-like object
+                  (error as any).message
+                : JSON.stringify(error));
+        alert('Błąd podczas usuwania: ' + message);
       }
     }
   }
 
   return (
-    <section className="my-8">
+    <section className="my-4">
       {/* Header */}
       <div className="mb-8">
-        <h2 className="text-4xl font-bold text-gray-900 mb-2">Składniki</h2>
-        <p className="text-gray-600">Zarządzaj bazą danych składników, cenami i progami minimalnych</p>
+        <h2 className="text-2xl font-semibold text-gray-900 mb-1">Składniki</h2>
+        <p className="text-sm text-gray-600">Zarządzaj bazą danych składników, cenami i progami minimalnych</p>
       </div>
 
       {/* Search & Filter Bar */}
-      <Card className="mb-6 border-0 shadow-md">
-        <CardContent className="pt-6">
-          <div className="space-y-4">
-            <div className="flex gap-3">
+      <Card className="mb-4 border-0 shadow-sm">
+        <CardContent className="pt-4 pb-3">
+          <div className="space-y-3">
+            <div className="flex gap-2">
               <div className="flex-1">
                 <Input
                   placeholder="Wyszukaj składnik..."
                   value={search}
                   onChange={e => setSearch(e.target.value)}
-                  className="h-10"
+                  className="h-8 text-sm"
                 />
               </div>
               <select 
                 value={categoryFilter} 
                 onChange={e => setCategoryFilter(e.target.value)}
-                className="px-4 py-2 border border-gray-300 rounded-md bg-white hover:border-gray-400 transition"
+                className="px-3 py-1.5 text-xs border border-gray-300 rounded-md bg-white hover:border-gray-400 transition"
               >
                 <option value="">Wszystkie kategorie</option>
                 {INGREDIENT_CATEGORIES.map(cat => (
@@ -161,7 +184,7 @@ function IngredientsSection({ supabase }: { supabase: SupabaseClient }) {
                 ))}
               </select>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 text-xs">
               <Button 
                 onClick={() => setSortBy("name")}
                 variant={sortBy === "name" ? "default" : "outline"}
@@ -183,63 +206,66 @@ function IngredientsSection({ supabase }: { supabase: SupabaseClient }) {
 
       {/* Ingredients List */}
       {ingredients.length === 0 ? (
-        <Card className="text-center py-12 border-dashed">
-          <p className="text-gray-500 text-lg">Brak składników</p>
+        <Card className="text-center py-6 border-dashed">
+          <p className="text-gray-500 text-sm">Brak składników</p>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 gap-4 mb-8">
+        <div className="grid grid-cols-1 gap-3 mb-6">
           {ingredients.map(ing => (
             <Card key={ing.id} className="border-0 shadow-sm hover:shadow-md transition-shadow">
-              <CardContent className="pt-6">
+              <CardContent className="pt-4 pb-3">
                 {editingId === ing.id ? (
                   // Edit Mode
                   <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label className="text-sm font-semibold">Nazwa</Label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-semibold">Nazwa</Label>
                         <Input 
                           value={editIngredient.name || ing.name} 
                           onChange={e => setEditIngredient({ ...editIngredient, name: e.target.value })}
+                          className="h-8 text-sm"
                         />
                       </div>
-                      <div className="space-y-2">
-                        <Label className="text-sm font-semibold">Kategoria</Label>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-semibold">Kategoria</Label>
                         <select 
                           value={editIngredient.category || ing.category}
                           onChange={e => setEditIngredient({ ...editIngredient, category: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                          className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-md"
                         >
                           {INGREDIENT_CATEGORIES.map(cat => (
                             <option key={cat} value={cat}>{cat}</option>
                           ))}
                         </select>
                       </div>
-                      <div className="space-y-2">
-                        <Label className="text-sm font-semibold">Jednostka</Label>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-semibold">Jednostka</Label>
                         <select 
                           value={editIngredient.base_unit || ing.base_unit}
                           onChange={e => setEditIngredient({ ...editIngredient, base_unit: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                          className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-md"
                         >
                           {INGREDIENT_UNITS.map(u => (
                             <option key={u} value={u}>{u}</option>
                           ))}
                         </select>
                       </div>
-                      <div className="space-y-2">
-                        <Label className="text-sm font-semibold">Min próg</Label>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-semibold">Min próg</Label>
                         <Input
                           type="number"
                           value={(editIngredient.min_threshold ?? ing.min_threshold ?? '') as any}
                           onChange={e => setEditIngredient({ ...editIngredient, min_threshold: Number(e.target.value) })}
+                          className="h-8 text-sm"
                         />
                       </div>
-                      <div className="space-y-2">
-                        <Label className="text-sm font-semibold">Cena</Label>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-semibold">Cena</Label>
                         <Input
                           type="number"
                           value={(editIngredient.last_price ?? ing.last_price ?? '') as any}
                           onChange={e => setEditIngredient({ ...editIngredient, last_price: Number(e.target.value) })}
+                          className="h-8 text-sm"
                         />
                       </div>
                     </div>
@@ -264,23 +290,23 @@ function IngredientsSection({ supabase }: { supabase: SupabaseClient }) {
                   // View Mode
                   <div className="flex items-center justify-between">
                     <div className="flex-1">
-                      <h3 className="text-lg font-semibold text-gray-900 mb-2">{ing.name}</h3>
-                      <div className="grid grid-cols-4 gap-6 text-sm">
+                      <h3 className="text-base font-semibold text-gray-900 mb-1.5">{ing.name}</h3>
+                      <div className="grid grid-cols-4 gap-4 text-xs">
                         <div>
                           <p className="text-gray-500 text-xs uppercase tracking-wide">Kategoria</p>
-                          <p className="text-gray-900 font-medium mt-1">{ing.category}</p>
+                          <p className="text-gray-900 font-medium mt-0.5">{ing.category}</p>
                         </div>
                         <div>
                           <p className="text-gray-500 text-xs uppercase tracking-wide">Jednostka</p>
-                          <p className="text-gray-900 font-medium mt-1">{ing.base_unit}</p>
+                          <p className="text-gray-900 font-medium mt-0.5">{ing.base_unit}</p>
                         </div>
                         <div>
                           <p className="text-gray-500 text-xs uppercase tracking-wide">Min próg</p>
-                          <p className="text-gray-900 font-medium mt-1">{ing.min_threshold || '—'}</p>
+                          <p className="text-gray-900 font-medium mt-0.5">{ing.min_threshold || '—'}</p>
                         </div>
                         <div>
                           <p className="text-gray-500 text-xs uppercase tracking-wide">Cena</p>
-                          <p className="text-gray-900 font-semibold mt-1 text-lg">{ing.last_price ? `${ing.last_price.toFixed(2)} zł` : '—'}</p>
+                          <p className="text-gray-900 font-semibold mt-0.5 text-sm">{ing.last_price ? `${ing.last_price.toFixed(2)} zł` : '—'}</p>
                         </div>
                       </div>
                     </div>
@@ -309,30 +335,31 @@ function IngredientsSection({ supabase }: { supabase: SupabaseClient }) {
       )}
 
       {/* Add Ingredient Form */}
-      <Card className="border-0 shadow-md bg-gradient-to-br from-blue-50 to-indigo-50">
+      <Card className="mt-4 border-0 shadow-sm bg-gradient-to-br from-blue-50 to-indigo-50">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Plus className="w-5 h-5" />
+          <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+            <Plus className="w-4 h-4" />
             Dodaj nowy składnik
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-              <div className="space-y-2">
-                <Label className="text-sm font-semibold">Nazwa *</Label>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Nazwa *</Label>
                 <Input 
                   placeholder="np. Śmietana" 
                   value={newIngredient.name} 
                   onChange={e => setNewIngredient({ ...newIngredient, name: e.target.value })}
+                  className="h-8 text-sm"
                 />
               </div>
-              <div className="space-y-2">
-                <Label className="text-sm font-semibold">Kategoria *</Label>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Kategoria *</Label>
                 <select 
                   value={newIngredient.category} 
                   onChange={e => setNewIngredient({ ...newIngredient, category: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white"
+                  className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-md bg-white"
                 >
                   <option value="">Wybierz</option>
                   {INGREDIENT_CATEGORIES.map(cat => (
@@ -340,12 +367,12 @@ function IngredientsSection({ supabase }: { supabase: SupabaseClient }) {
                   ))}
                 </select>
               </div>
-              <div className="space-y-2">
-                <Label className="text-sm font-semibold">Jednostka *</Label>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Jednostka *</Label>
                 <select 
                   value={newIngredient.base_unit} 
                   onChange={e => setNewIngredient({ ...newIngredient, base_unit: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white"
+                  className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-md bg-white"
                 >
                   <option value="">Wybierz</option>
                   {INGREDIENT_UNITS.map(u => (
@@ -353,30 +380,32 @@ function IngredientsSection({ supabase }: { supabase: SupabaseClient }) {
                   ))}
                 </select>
               </div>
-              <div className="space-y-2">
-                <Label className="text-sm font-semibold">Min próg</Label>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Min próg</Label>
                 <Input 
                   type="number"
                   placeholder="0" 
                   value={newIngredient.min_threshold} 
-                  onChange={e => setNewIngredient({ ...newIngredient, min_threshold: e.target.value })} 
+                  onChange={e => setNewIngredient({ ...newIngredient, min_threshold: e.target.value })}
+                  className="h-8 text-sm" 
                 />
               </div>
-              <div className="space-y-2">
-                <Label className="text-sm font-semibold">Cena (zł)</Label>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Cena (zł)</Label>
                 <Input 
                   type="number"
                   placeholder="0.00" 
                   value={newIngredient.last_price} 
-                  onChange={e => setNewIngredient({ ...newIngredient, last_price: e.target.value })} 
+                  onChange={e => setNewIngredient({ ...newIngredient, last_price: e.target.value })}
+                  className="h-8 text-sm" 
                 />
               </div>
               <div className="flex items-end">
                 <Button 
                   onClick={addIngredient}
-                  className="w-full bg-blue-600 hover:bg-blue-700"
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-xs h-8"
                 >
-                  <Plus className="w-4 h-4 mr-2" />Dodaj
+                  <Plus className="w-3 h-3 mr-1" />Dodaj
                 </Button>
               </div>
             </div>
