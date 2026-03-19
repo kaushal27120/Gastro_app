@@ -23,6 +23,8 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "rechart": "^0.0.1",
+    "recharts": "^3.8.0",
+    "stripe": "^16.12.0",
     "tailwind-merge": "^3.4.0",
     "xlsx": "^0.18.5"
   },

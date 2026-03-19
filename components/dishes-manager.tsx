@@ -2,15 +2,15 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Trash2, Plus, Save } from 'lucide-react'
+import { Trash2, Plus, Save, ChevronDown } from 'lucide-react'
 
 interface DishesManagerProps {
   supabase: SupabaseClient
+  companyId?: string | null
 }
 
 type Recipe = {
@@ -54,7 +54,7 @@ type RecipeIngredient = {
   ingredients?: { name: string; base_unit: string; category: string } | { name: string; base_unit: string; category: string }[] | null
 }
 
-export function DishesManager({ supabase }: DishesManagerProps) {
+export function DishesManager({ supabase, companyId }: DishesManagerProps) {
   const [recipes, setRecipes] = useState<Recipe[]>([])
   const [ingredients, setIngredients] = useState<Ingredient[]>([])
   const [locations, setLocations] = useState<Location[]>([])
@@ -120,7 +120,17 @@ export function DishesManager({ supabase }: DishesManagerProps) {
   }
 
   const fetchLocations = async () => {
-    const { data } = await supabase.from('locations').select('id, name').order('name')
+    if (!companyId) {
+      setLocations([])
+      return
+    }
+
+    const { data } = await supabase
+      .from('locations')
+      .select('id, name')
+      .eq('company_id', companyId)
+      .order('name')
+
     setLocations((data as Location[]) || [])
     if (data && data.length > 0 && !newDish.locationId) {
       setNewDish((prev) => ({ ...prev, locationId: data[0].id }))
@@ -235,6 +245,7 @@ export function DishesManager({ supabase }: DishesManagerProps) {
       margin_target: Number(newDish.marginTarget) || 0.7,
       food_cost_target: Number(newDish.foodCostTarget) || 0.3,
       status: newDish.status,
+      company_id: companyId || null,
     })
     if (error) {
       handleError('Błąd dodawania dania', error)
@@ -338,40 +349,51 @@ export function DishesManager({ supabase }: DishesManagerProps) {
     fetchRecipeIngredients(selectedRecipeId)
   }
 
+  const statusCls = (s: string | null) =>
+    s === 'active' ? 'status-green' : 'status-gray'
+
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Menu - Dania (ceny)</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-6 gap-3 items-end">
+
+      {/* ── Section: Dania w menu ────────────────────── */}
+      <section className="bg-white border border-[#E5E7EB] rounded-lg shadow-[0_1px_3px_rgba(0,0,0,0.04)] overflow-hidden">
+
+        {/* Section header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#E5E7EB]">
+          <div>
+            <h2 className="text-[14px] font-semibold text-[#111827]">Dania w menu</h2>
+            <p className="text-[12px] text-[#6B7280] mt-0.5">{dishes.length} pozycji</p>
+          </div>
+        </div>
+
+        {/* Add dish form */}
+        <div className="px-5 py-4 border-b border-[#E5E7EB] bg-[#F9FAFB]">
+          <p className="text-[11px] font-semibold uppercase tracking-widest text-[#9CA3AF] mb-3">
+            Nowe danie
+          </p>
+          <div className="grid grid-cols-6 gap-2 items-end">
             <div>
-              <Label className="text-xs">Receptura</Label>
+              <Label className="text-[11px] text-[#6B7280] mb-1 block">Receptura</Label>
               <Select value={newDish.recipeId} onValueChange={(val) => setNewDish({ ...newDish, recipeId: val })}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Wybierz" />
+                <SelectTrigger className="h-8 text-[13px]">
+                  <SelectValue placeholder="Wybierz…" />
                 </SelectTrigger>
                 <SelectContent>
                   {recipes.map((r) => (
-                    <SelectItem key={r.id} value={r.id}>
-                      {r.name}
-                    </SelectItem>
+                    <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div>
-              <Label className="text-xs">Lokalizacja</Label>
+              <Label className="text-[11px] text-[#6B7280] mb-1 block">Lokalizacja</Label>
               <Select value={newDish.locationId} onValueChange={(val) => setNewDish({ ...newDish, locationId: val })}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Wybierz" />
+                <SelectTrigger className="h-8 text-[13px]">
+                  <SelectValue placeholder="Wybierz…" />
                 </SelectTrigger>
                 <SelectContent>
                   {locations.map((l) => (
-                    <SelectItem key={l.id} value={l.id}>
-                      {l.name}
-                    </SelectItem>
+                    <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -380,262 +402,379 @@ export function DishesManager({ supabase }: DishesManagerProps) {
               placeholder="Nazwa dania"
               value={newDish.dishName}
               onChange={(e) => setNewDish({ ...newDish, dishName: e.target.value })}
+              className="h-8 text-[13px]"
             />
             <Input
               type="number"
-              placeholder="Cena net"
+              placeholder="Cena netto"
               value={newDish.priceNet}
               onChange={(e) => setNewDish({ ...newDish, priceNet: e.target.value })}
+              className="h-8 text-[13px]"
             />
             <Input
               type="number"
               placeholder="VAT %"
               value={newDish.vatRate}
               onChange={(e) => setNewDish({ ...newDish, vatRate: e.target.value })}
+              className="h-8 text-[13px]"
             />
-            <Button onClick={addDish} className="gap-2" disabled={savingDish}>
-              <Plus className="w-4 h-4" /> Dodaj danie
-            </Button>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-gray-50">
-                  <th className="text-left p-2">Danie</th>
-                  <th className="text-left p-2">Receptura</th>
-                  <th className="text-right p-2">Netto</th>
-                  <th className="text-right p-2">Brutto</th>
-                  <th className="text-right p-2">VAT%</th>
-                  <th className="text-right p-2">Status</th>
-                  <th className="text-right p-2">Akcje</th>
-                </tr>
-              </thead>
-              <tbody>
-                {dishes.map((d) => (
-                  <tr key={d.id} className="border-b">
-                    {editingDishId === d.id ? (
-                      <>
-                        <td className="p-2">
-                          <Input value={editingDish.dish_name || d.dish_name} onChange={(e) => setEditingDish({ ...editingDish, dish_name: e.target.value })} />
-                        </td>
-                        <td className="p-2 text-xs">
-                          {recipes.find(r => r.id === d.recipe_id)?.name || d.recipe_id}
-                        </td>
-                        <td className="p-2">
-                          <Input type="number" value={editingDish.menu_price_net ?? d.menu_price_net ?? ''} onChange={(e) => setEditingDish({ ...editingDish, menu_price_net: Number(e.target.value) })} />
-                        </td>
-                        <td className="p-2">
-                          <Input type="number" value={editingDish.menu_price_gross ?? d.menu_price_gross ?? ''} onChange={(e) => setEditingDish({ ...editingDish, menu_price_gross: Number(e.target.value) })} />
-                        </td>
-                        <td className="p-2">
-                          <Input type="number" value={editingDish.vat_rate ?? d.vat_rate ?? 8} onChange={(e) => setEditingDish({ ...editingDish, vat_rate: Number(e.target.value) })} />
-                        </td>
-                        <td className="p-2">
-                          <Input value={editingDish.status ?? d.status ?? 'active'} onChange={(e) => setEditingDish({ ...editingDish, status: e.target.value })} />
-                        </td>
-                        <td className="p-2 text-right">
-                          <div className="flex justify-end gap-2">
-                            <Button size="sm" variant="outline" onClick={() => saveDish({ ...d, ...editingDish } as Dish)}>
-                              <Save className="w-4 h-4" />
-                            </Button>
-                            <Button size="sm" variant="destructive" onClick={() => setEditingDishId(null)}>
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
-                          </div>
-                        </td>
-                      </>
-                    ) : (
-                      <>
-                        <td className="p-2 font-medium">{d.dish_name}</td>
-                        <td className="p-2 text-xs">{recipes.find(r => r.id === d.recipe_id)?.name || d.recipe_id}</td>
-                        <td className="p-2 text-right">{d.menu_price_net ?? '-'}</td>
-                        <td className="p-2 text-right">{d.menu_price_gross ?? '-'}</td>
-                        <td className="p-2 text-right">{d.vat_rate ?? 8}</td>
-                        <td className="p-2 text-right">{d.status ?? 'active'}</td>
-                        <td className="p-2 text-right">
-                          <div className="flex justify-end gap-2">
-                            <Button size="sm" variant="outline" onClick={() => { setEditingDishId(d.id); setEditingDish(d) }}>
-                              <Save className="w-4 h-4" />
-                            </Button>
-                            <Button size="sm" variant="destructive" onClick={() => deleteDish(d.id)}>
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
-                          </div>
-                        </td>
-                      </>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Dodaj nowe danie / recepturę</CardTitle>
-        </CardHeader>
-        <CardContent className="grid grid-cols-4 gap-3">
-          <Input
-            placeholder="Nazwa dania"
-            value={newRecipe.name}
-            onChange={(e) => setNewRecipe({ ...newRecipe, name: e.target.value })}
-          />
-          <Input
-            placeholder="Kategoria (opcjonalnie)"
-            value={newRecipe.category}
-            onChange={(e) => setNewRecipe({ ...newRecipe, category: e.target.value })}
-          />
-          <Input
-            placeholder="Porcje"
-            type="number"
-            value={newRecipe.portions}
-            onChange={(e) => setNewRecipe({ ...newRecipe, portions: e.target.value })}
-          />
-          <Button onClick={addRecipe} className="gap-2" disabled={savingRecipe}>
-            <Plus className="w-4 h-4" /> Dodaj
-          </Button>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Wybierz danie</CardTitle>
-        </CardHeader>
-        <CardContent className="flex gap-3 items-center">
-          <div className="flex-1">
-            <Select value={selectedRecipeId} onValueChange={setSelectedRecipeId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Wybierz danie..." />
-              </SelectTrigger>
-              <SelectContent>
-                {recipes.map((r) => (
-                  <SelectItem key={r.id} value={r.id}>
-                    {r.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {selectedRecipe && (
             <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => deleteRecipe(selectedRecipe.id)}
-              className="gap-2"
+              onClick={addDish}
+              disabled={savingDish}
+              className="h-8 text-[13px] bg-[#2563EB] hover:bg-[#1D4ED8] text-white gap-1.5 px-3"
             >
-              <Trash2 className="w-4 h-4" /> Usuń danie
+              <Plus className="w-3.5 h-3.5" />
+              {savingDish ? 'Dodawanie…' : 'Dodaj'}
             </Button>
-          )}
-        </CardContent>
-      </Card>
+          </div>
+        </div>
 
-      {selectedRecipe && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Składniki dla: {selectedRecipe.name}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="text-sm text-slate-600">
-              Aktualny koszt receptury: <span className="font-semibold">{recipeCost.toFixed(2)} zł</span>
+        {/* Dishes table */}
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-[#E5E7EB]">
+                {['Danie', 'Receptura', 'Netto', 'Brutto', 'VAT%', 'Status', ''].map((h, i) => (
+                  <th
+                    key={i}
+                    className={`px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-[#6B7280] bg-[#F9FAFB] ${i > 1 ? 'text-right' : 'text-left'}`}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {dishes.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-4 py-8 text-center text-[13px] text-[#9CA3AF]">
+                    Brak dań w menu. Dodaj pierwsze danie powyżej.
+                  </td>
+                </tr>
+              )}
+              {dishes.map((d) => (
+                <tr key={d.id} className="border-b border-[#F3F4F6] hover:bg-[#F9FAFB] transition-colors">
+                  {editingDishId === d.id ? (
+                    <>
+                      <td className="px-4 py-2">
+                        <Input
+                          value={editingDish.dish_name || d.dish_name}
+                          onChange={(e) => setEditingDish({ ...editingDish, dish_name: e.target.value })}
+                          className="h-7 text-[13px]"
+                        />
+                      </td>
+                      <td className="px-4 py-2 text-[12px] text-[#6B7280]">
+                        {recipes.find(r => r.id === d.recipe_id)?.name || d.recipe_id}
+                      </td>
+                      <td className="px-4 py-2">
+                        <Input
+                          type="number"
+                          value={editingDish.menu_price_net ?? d.menu_price_net ?? ''}
+                          onChange={(e) => setEditingDish({ ...editingDish, menu_price_net: Number(e.target.value) })}
+                          className="h-7 text-[13px] text-right w-24 ml-auto"
+                        />
+                      </td>
+                      <td className="px-4 py-2">
+                        <Input
+                          type="number"
+                          value={editingDish.menu_price_gross ?? d.menu_price_gross ?? ''}
+                          onChange={(e) => setEditingDish({ ...editingDish, menu_price_gross: Number(e.target.value) })}
+                          className="h-7 text-[13px] text-right w-24 ml-auto"
+                        />
+                      </td>
+                      <td className="px-4 py-2">
+                        <Input
+                          type="number"
+                          value={editingDish.vat_rate ?? d.vat_rate ?? 8}
+                          onChange={(e) => setEditingDish({ ...editingDish, vat_rate: Number(e.target.value) })}
+                          className="h-7 text-[13px] text-right w-16 ml-auto"
+                        />
+                      </td>
+                      <td className="px-4 py-2">
+                        <Input
+                          value={editingDish.status ?? d.status ?? 'active'}
+                          onChange={(e) => setEditingDish({ ...editingDish, status: e.target.value })}
+                          className="h-7 text-[13px] w-24 ml-auto"
+                        />
+                      </td>
+                      <td className="px-4 py-2">
+                        <div className="flex justify-end gap-1.5">
+                          <button
+                            onClick={() => saveDish({ ...d, ...editingDish } as Dish)}
+                            className="h-7 px-2.5 rounded text-[12px] font-medium bg-[#2563EB] text-white hover:bg-[#1D4ED8] transition-colors flex items-center gap-1"
+                          >
+                            <Save className="w-3 h-3" /> Zapisz
+                          </button>
+                          <button
+                            onClick={() => setEditingDishId(null)}
+                            className="h-7 px-2 rounded text-[12px] text-[#6B7280] hover:bg-[#F3F4F6] transition-colors"
+                          >
+                            Anuluj
+                          </button>
+                        </div>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="px-4 py-3 text-[13px] font-medium text-[#111827]">{d.dish_name}</td>
+                      <td className="px-4 py-3 text-[12px] text-[#6B7280]">
+                        {recipes.find(r => r.id === d.recipe_id)?.name || '—'}
+                      </td>
+                      <td className="px-4 py-3 text-[13px] text-right tabular-nums text-[#374151]">
+                        {d.menu_price_net != null ? `${d.menu_price_net.toFixed(2)} zł` : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-[13px] text-right tabular-nums font-semibold text-[#111827]">
+                        {d.menu_price_gross != null ? `${d.menu_price_gross.toFixed(2)} zł` : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-[13px] text-right tabular-nums text-[#374151]">
+                        {d.vat_rate ?? 8}%
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={statusCls(d.status)}>
+                          {d.status === 'active' ? 'Aktywne' : d.status ?? 'active'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex justify-end gap-1.5">
+                          <button
+                            onClick={() => { setEditingDishId(d.id); setEditingDish(d) }}
+                            className="h-7 px-2.5 rounded text-[12px] font-medium border border-[#E5E7EB] text-[#374151] hover:border-[#2563EB] hover:text-[#2563EB] transition-colors"
+                          >
+                            Edytuj
+                          </button>
+                          <button
+                            onClick={() => deleteDish(d.id)}
+                            className="h-7 px-2 rounded text-[12px] text-[#6B7280] hover:bg-[#FEF2F2] hover:text-[#DC2626] transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* ── Section: Receptury ──────────────────────── */}
+      <section className="bg-white border border-[#E5E7EB] rounded-lg shadow-[0_1px_3px_rgba(0,0,0,0.04)] overflow-hidden">
+
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#E5E7EB]">
+          <div>
+            <h2 className="text-[14px] font-semibold text-[#111827]">Receptury</h2>
+            <p className="text-[12px] text-[#6B7280] mt-0.5">{recipes.length} receptur</p>
+          </div>
+        </div>
+
+        {/* Add recipe form */}
+        <div className="px-5 py-4 border-b border-[#E5E7EB] bg-[#F9FAFB]">
+          <p className="text-[11px] font-semibold uppercase tracking-widest text-[#9CA3AF] mb-3">
+            Nowa receptura
+          </p>
+          <div className="grid grid-cols-4 gap-2 items-end">
+            <Input
+              placeholder="Nazwa receptury"
+              value={newRecipe.name}
+              onChange={(e) => setNewRecipe({ ...newRecipe, name: e.target.value })}
+              className="h-8 text-[13px]"
+            />
+            <Input
+              placeholder="Kategoria (opcjonalnie)"
+              value={newRecipe.category}
+              onChange={(e) => setNewRecipe({ ...newRecipe, category: e.target.value })}
+              className="h-8 text-[13px]"
+            />
+            <Input
+              placeholder="Porcje"
+              type="number"
+              value={newRecipe.portions}
+              onChange={(e) => setNewRecipe({ ...newRecipe, portions: e.target.value })}
+              className="h-8 text-[13px]"
+            />
+            <Button
+              onClick={addRecipe}
+              disabled={savingRecipe}
+              className="h-8 text-[13px] bg-[#2563EB] hover:bg-[#1D4ED8] text-white gap-1.5 px-3"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              {savingRecipe ? 'Dodawanie…' : 'Dodaj recepturę'}
+            </Button>
+          </div>
+        </div>
+
+        {/* Recipe selector */}
+        <div className="px-5 py-4">
+          <div className="flex gap-3 items-center">
+            <div className="flex-1 max-w-sm">
+              <Label className="text-[11px] text-[#6B7280] mb-1.5 block">Wybierz recepturę do edycji składników</Label>
+              <Select value={selectedRecipeId} onValueChange={setSelectedRecipeId}>
+                <SelectTrigger className="h-9 text-[13px]">
+                  <SelectValue placeholder="Wybierz recepturę…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {recipes.map((r) => (
+                    <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-            <div className="grid grid-cols-4 gap-3 items-end">
+            {selectedRecipe && (
+              <button
+                onClick={() => deleteRecipe(selectedRecipe.id)}
+                className="mt-5 h-9 px-3 rounded-md text-[13px] font-medium border border-[#E5E7EB] text-[#6B7280] hover:bg-[#FEF2F2] hover:text-[#DC2626] hover:border-[#FECACA] transition-colors flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Usuń recepturę
+              </button>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Section: Składniki receptury ─────────────── */}
+      {selectedRecipe && (
+        <section className="bg-white border border-[#E5E7EB] rounded-lg shadow-[0_1px_3px_rgba(0,0,0,0.04)] overflow-hidden">
+
+          <div className="flex items-center justify-between px-5 py-4 border-b border-[#E5E7EB]">
+            <div>
+              <h2 className="text-[14px] font-semibold text-[#111827]">
+                Składniki — {selectedRecipe.name}
+              </h2>
+              <p className="text-[12px] text-[#6B7280] mt-0.5">
+                Koszt receptury:&nbsp;
+                <span className="font-semibold tabular-nums text-[#111827]">
+                  {recipeCost.toFixed(2)} zł
+                </span>
+              </p>
+            </div>
+          </div>
+
+          {/* Add ingredient form */}
+          <div className="px-5 py-4 border-b border-[#E5E7EB] bg-[#F9FAFB]">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-[#9CA3AF] mb-3">
+              Dodaj składnik
+            </p>
+            <div className="grid grid-cols-4 gap-2 items-end">
               <div>
-                <Label className="text-xs">Składnik</Label>
+                <Label className="text-[11px] text-[#6B7280] mb-1 block">Składnik</Label>
                 <Select value={newItem.ingredientId} onValueChange={(val) => setNewItem({ ...newItem, ingredientId: val })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Wybierz składnik" />
+                  <SelectTrigger className="h-8 text-[13px]">
+                    <SelectValue placeholder="Wybierz…" />
                   </SelectTrigger>
                   <SelectContent>
                     {ingredients.map((ing) => (
-                      <SelectItem key={ing.id} value={ing.id}>
-                        {ing.name}
-                      </SelectItem>
+                      <SelectItem key={ing.id} value={ing.id}>{ing.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               <div>
-                <Label className="text-xs">Ilość</Label>
+                <Label className="text-[11px] text-[#6B7280] mb-1 block">Ilość</Label>
                 <Input
                   type="number"
                   value={newItem.quantity}
                   onChange={(e) => setNewItem({ ...newItem, quantity: e.target.value })}
+                  className="h-8 text-[13px]"
                 />
               </div>
               <div>
-                <Label className="text-xs">Jednostka</Label>
+                <Label className="text-[11px] text-[#6B7280] mb-1 block">Jednostka</Label>
                 <Input
                   placeholder="kg / g / l"
                   value={newItem.unit}
                   onChange={(e) => setNewItem({ ...newItem, unit: e.target.value })}
+                  className="h-8 text-[13px]"
                 />
               </div>
-              <Button onClick={addRecipeIngredient} className="gap-2" disabled={savingIngredient}>
-                <Plus className="w-4 h-4" /> Dodaj składnik
+              <Button
+                onClick={addRecipeIngredient}
+                disabled={savingIngredient}
+                className="h-8 text-[13px] bg-[#2563EB] hover:bg-[#1D4ED8] text-white gap-1.5 px-3"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                {savingIngredient ? 'Dodawanie…' : 'Dodaj'}
               </Button>
             </div>
+          </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-gray-50">
-                    <th className="text-left p-2">Składnik</th>
-                    <th className="text-left p-2">Ilość</th>
-                    <th className="text-left p-2">Jednostka</th>
-                    <th className="text-right p-2">Akcje</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recipeIngredients.map((ri) => (
-                    <tr key={ri.id} className="border-b">
-                      <td className="p-2">
-                        {Array.isArray(ri.ingredients)
-                          ? (ri.ingredients[0]?.name || ri.ingredient_id)
-                          : (ri.ingredients?.name || ri.ingredient_id)}
-                      </td>
-                      <td className="p-2">
-                        <Input
-                          type="number"
-                          value={ri.quantity}
-                          onChange={(e) =>
-                            setRecipeIngredients((prev) =>
-                              prev.map((p) => (p.id === ri.id ? { ...p, quantity: Number(e.target.value) } : p))
-                            )
-                          }
-                          className="h-8"
-                        />
-                      </td>
-                      <td className="p-2">
-                        <Input
-                          value={ri.unit}
-                          onChange={(e) =>
-                            setRecipeIngredients((prev) =>
-                              prev.map((p) => (p.id === ri.id ? { ...p, unit: e.target.value } : p))
-                            )
-                          }
-                          className="h-8"
-                        />
-                      </td>
-                      <td className="p-2 text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button size="sm" variant="outline" onClick={() => updateRecipeIngredient(ri)}>
-                            <Save className="w-4 h-4" />
-                          </Button>
-                          <Button size="sm" variant="destructive" onClick={() => removeRecipeIngredient(ri.id)}>
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
+          {/* Ingredients table */}
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-[#E5E7EB]">
+                  {['Składnik', 'Ilość', 'Jednostka', ''].map((h, i) => (
+                    <th
+                      key={i}
+                      className={`px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-[#6B7280] bg-[#F9FAFB] ${i === 3 ? 'text-right' : 'text-left'}`}
+                    >
+                      {h}
+                    </th>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
+                </tr>
+              </thead>
+              <tbody>
+                {recipeIngredients.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-6 text-center text-[13px] text-[#9CA3AF]">
+                      Brak składników. Dodaj pierwszy składnik powyżej.
+                    </td>
+                  </tr>
+                )}
+                {recipeIngredients.map((ri) => (
+                  <tr key={ri.id} className="border-b border-[#F3F4F6] hover:bg-[#F9FAFB] transition-colors">
+                    <td className="px-4 py-2.5 text-[13px] font-medium text-[#111827]">
+                      {Array.isArray(ri.ingredients)
+                        ? (ri.ingredients[0]?.name || ri.ingredient_id)
+                        : (ri.ingredients?.name || ri.ingredient_id)}
+                    </td>
+                    <td className="px-4 py-2">
+                      <Input
+                        type="number"
+                        value={ri.quantity}
+                        onChange={(e) =>
+                          setRecipeIngredients((prev) =>
+                            prev.map((p) => (p.id === ri.id ? { ...p, quantity: Number(e.target.value) } : p))
+                          )
+                        }
+                        className="h-7 text-[13px] w-24 tabular-nums"
+                      />
+                    </td>
+                    <td className="px-4 py-2">
+                      <Input
+                        value={ri.unit}
+                        onChange={(e) =>
+                          setRecipeIngredients((prev) =>
+                            prev.map((p) => (p.id === ri.id ? { ...p, unit: e.target.value } : p))
+                          )
+                        }
+                        className="h-7 text-[13px] w-20"
+                      />
+                    </td>
+                    <td className="px-4 py-2">
+                      <div className="flex justify-end gap-1.5">
+                        <button
+                          onClick={() => updateRecipeIngredient(ri)}
+                          className="h-7 px-2.5 rounded text-[12px] font-medium bg-[#2563EB] text-white hover:bg-[#1D4ED8] transition-colors flex items-center gap-1"
+                        >
+                          <Save className="w-3 h-3" /> Zapisz
+                        </button>
+                        <button
+                          onClick={() => removeRecipeIngredient(ri.id)}
+                          className="h-7 px-2 rounded text-[12px] text-[#6B7280] hover:bg-[#FEF2F2] hover:text-[#DC2626] transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       )}
     </div>
   )

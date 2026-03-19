@@ -1,5 +1,6 @@
 // app/roles.ts
 export const ROLES = {
+  OWNER: 'owner',
   SUPERADMIN: 'superadmin',
   OPS_ADMIN: 'operational_admin',
   POINT_MANAGER: 'point_manager',
@@ -10,6 +11,7 @@ export const ROLES = {
 
 export function getDashboardRoute(role: string): string {
   switch (role) {
+    case ROLES.OWNER:
     case ROLES.SUPERADMIN:
     case ROLES.OPS_ADMIN:
       return '/admin' 
@@ -27,7 +29,7 @@ export function getDashboardRoute(role: string): string {
     case ROLES.ACCOUNTING:
       return '/finance' // New Dashboard
       
-    default:
-      return '/login'
+      default:
+        return '/auth/login'
   }
 }

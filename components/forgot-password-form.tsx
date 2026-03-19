@@ -1,105 +1,88 @@
 "use client";
 
-import { cn } from "@/lib/utils";
-import { createClient } from "@/lib/supabase/client";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import Link from "next/link";
 import { useState } from "react";
+import Link from "next/link";
+import { createClient } from "@/lib/supabase/client";
+import { ArrowRight, Mail, CheckCircle2 } from "lucide-react";
 
-export function ForgotPasswordForm({
-  className,
-  ...props
-}: React.ComponentPropsWithoutRef<"div">) {
+export function ForgotPasswordForm() {
   const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const handleForgotPassword = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const supabase = createClient();
-    setIsLoading(true);
+    setLoading(true);
     setError(null);
-
     try {
-      // The url which will be included in the email. This URL needs to be configured in your redirect URLs in the Supabase dashboard at https://supabase.com/dashboard/project/_/auth/url-configuration
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: `${window.location.origin}/auth/update-password`,
       });
       if (error) throw error;
       setSuccess(true);
-    } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : "An error occurred");
+    } catch (err: any) {
+      setError(err.message || "Błąd. Sprawdź adres email i spróbuj ponownie.");
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
+  if (success) {
+    return (
+      <div className="text-center space-y-5">
+        <div className="w-16 h-16 rounded-full bg-green-500/15 border border-green-500/25 flex items-center justify-center mx-auto">
+          <CheckCircle2 className="w-8 h-8 text-green-400" />
+        </div>
+        <div>
+          <h3 className="text-[20px] font-bold text-white mb-2">Sprawdź skrzynkę</h3>
+          <p className="text-[13px] text-white/45 leading-relaxed">
+            Wysłaliśmy link do resetowania hasła na adres <span className="text-white/70 font-medium">{email}</span>. Sprawdź też folder spam.
+          </p>
+        </div>
+        <Link href="/auth/login" className="block text-[13px] text-amber-400 hover:text-amber-300 font-medium transition-colors">
+          ← Wróć do logowania
+        </Link>
+      </div>
+    );
+  }
+
   return (
-    <div className={cn("flex flex-col gap-6", className)} {...props}>
-      {success ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-2xl">Sprawdź swoją skrzynkę</CardTitle>
-            <CardDescription>Instrukcje resetowania hasła wysłane</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">
-              Jeśli zarejestrowałeś się za pomocą e-maila i hasła, otrzymasz
-              e-mail do resetowania hasła.
-            </p>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-2xl">Resetuj hasło</CardTitle>
-            <CardDescription>
-              Wpisz swój email, a my wyślemy Ci link do resetowania
-              hasła
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleForgotPassword}>
-              <div className="flex flex-col gap-6">
-                <div className="grid gap-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="m@example.com"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
-                </div>
-                {error && <p className="text-sm text-red-500">{error}</p>}
-                <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? "Wysyłanie..." : "Wyślij link resetujący"}
-                </Button>
-              </div>
-              <div className="mt-4 text-center text-sm">
-                Masz już konto?{" "}
-                <Link
-                  href="/auth/login"
-                  className="underline underline-offset-4"
-                >
-                  Zaloguj się
-                </Link>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="space-y-1.5">
+        <label className="block text-[11px] font-semibold uppercase tracking-widest text-white/40 mb-1.5">
+          Adres email
+        </label>
+        <input
+          type="email"
+          required
+          value={email}
+          onChange={e => setEmail(e.target.value)}
+          placeholder="jan@restauracja.pl"
+          className="w-full h-12 px-4 rounded-xl bg-white/90 border border-white/20 text-gray-900 placeholder-gray-400 text-[14px] focus:outline-none focus:border-amber-400/70 focus:bg-white transition-all"
+        />
+      </div>
+
+      {error && (
+        <div className="text-[12px] text-red-300 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3">
+          {error}
+        </div>
       )}
-    </div>
+
+      <button
+        type="submit"
+        disabled={loading}
+        className="w-full h-12 rounded-xl bg-gradient-to-r from-amber-400 to-orange-500 text-[14px] font-bold text-white hover:from-amber-500 hover:to-orange-600 transition-all flex items-center justify-center gap-2 shadow-lg shadow-amber-500/25 disabled:opacity-60"
+      >
+        {loading ? "Wysyłanie..." : <><Mail className="w-4 h-4" /><span>Wyślij link resetujący</span></>}
+      </button>
+
+      <p className="text-center text-[13px] text-white/30 pt-1">
+        <Link href="/auth/login" className="text-white/50 hover:text-amber-400 transition-colors">
+          ← Wróć do logowania
+        </Link>
+      </p>
+    </form>
   );
 }

@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "OneLink Employee",
+    "slug": "onelink-employee",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#060B18"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "pl.onelink.employee"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#060B18"
+      },
+      "package": "pl.onelink.employee"
+    },
+    "plugins": []
+  }
+}

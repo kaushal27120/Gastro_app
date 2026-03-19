@@ -2,13 +2,10 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/app/supabase-client'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { AlertCircle, TrendingUp, Download, ChevronDown, Loader2 } from 'lucide-react'
 
 interface DeviationRecord {
@@ -49,31 +46,26 @@ export function WarehouseDeviationReport({
   const fetchDeviations = async () => {
     setLoading(true)
     try {
-      // Fetch warehouse_deviations with ingredient details
       const { data: deviationData, error: devError } = await supabase
         .from('warehouse_deviations')
         .select('*')
         .gte('period_start', periodStart)
         .lte('period_end', periodEnd)
         .order('deviation_pct', { ascending: false })
-      
+
       if (devError) {
-        console.warn('⚠️ No deviations table or data:', devError)
         setDeviations([])
         setLoading(false)
         return
       }
 
-      // Fetch ingredients for names and categories
       const { data: ingredientData } = await supabase.from('ingredients').select('id, name, category')
 
-      // Transform data to match DeviationRecord format
       const transformed = (deviationData || []).map((dev: any) => {
         const ingredient = ingredientData?.find((i: any) => i.id === dev.ingredient_id)
         const deviation = dev.actual_usage - dev.theoretical_usage
         const deviationPct = dev.theoretical_usage > 0 ? Math.abs(deviation / dev.theoretical_usage) * 100 : 0
-        
-        // Determine status based on deviation percentage
+
         let status: 'ok' | 'warning' | 'critical' = 'ok'
         if (deviationPct > 20) status = 'critical'
         else if (deviationPct > 10) status = 'warning'
@@ -84,17 +76,17 @@ export function WarehouseDeviationReport({
           category: ingredient?.category || 'Uncategorized',
           theoreticalUse: dev.theoretical_usage || 0,
           actualUse: dev.actual_usage || 0,
-          deviation: deviation,
-          deviationPct: deviationPct,
+          deviation,
+          deviationPct,
           valueZl: dev.deviation_value || 0,
-          status: status,
+          status,
           type: deviation > 0 ? 'positive' : 'negative',
         }
       })
 
       setDeviations(transformed)
     } catch (err) {
-      console.error('❌ Error fetching deviations:', err)
+      console.error('Error fetching deviations:', err)
       setDeviations([])
     } finally {
       setLoading(false)
@@ -108,14 +100,14 @@ export function WarehouseDeviationReport({
 
   const statusBadge = (status: 'ok' | 'warning' | 'critical') => {
     const badges = {
-      ok: { emoji: '🟢', text: 'OK', bg: 'bg-green-50', text_color: 'text-green-700' },
-      warning: { emoji: '🟡', text: 'Warning', bg: 'bg-yellow-50', text_color: 'text-yellow-700' },
-      critical: { emoji: '🔴', text: 'Critical', bg: 'bg-red-50', text_color: 'text-red-700' },
+      ok: { text: 'OK', cls: 'bg-[#F0FDF4] text-[#16A34A]' },
+      warning: { text: 'Uwaga', cls: 'bg-[#FFFBEB] text-[#D97706]' },
+      critical: { text: 'Krytyczny', cls: 'bg-[#FEF2F2] text-[#DC2626]' },
     }
     const badge = badges[status]
     return (
-      <span className={`px-2 py-1 rounded-full text-xs font-semibold ${badge.bg} ${badge.text_color}`}>
-        {badge.emoji} {badge.text}
+      <span className={`px-2 py-0.5 rounded-md text-[11px] font-semibold ${badge.cls}`}>
+        {badge.text}
       </span>
     )
   }
@@ -134,423 +126,321 @@ export function WarehouseDeviationReport({
   return (
     <div className="w-full space-y-4">
       {/* Period Selector */}
-      <div className="bg-white p-4 rounded-lg border space-y-3">
+      <div className="bg-white border border-[#E5E7EB] rounded-lg p-4">
         <div className="grid grid-cols-4 gap-4">
           <div>
-            <Label className="text-sm font-medium mb-2 block">Początek okresu</Label>
-            <Input type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} />
+            <Label className="text-[11px] font-semibold uppercase tracking-widest text-[#9CA3AF] mb-1.5 block">Początek okresu</Label>
+            <Input type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} className="h-8 text-[13px]" />
           </div>
           <div>
-            <Label className="text-sm font-medium mb-2 block">Koniec okresu</Label>
-            <Input type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} />
+            <Label className="text-[11px] font-semibold uppercase tracking-widest text-[#9CA3AF] mb-1.5 block">Koniec okresu</Label>
+            <Input type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} className="h-8 text-[13px]" />
           </div>
           <div>
-            <Label className="text-sm font-medium mb-2 block">Odśwież</Label>
-            <Button onClick={fetchDeviations} disabled={loading} className="w-full" variant="outline">
-              {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : '🔄'}
+            <Label className="text-[11px] font-semibold uppercase tracking-widest text-[#9CA3AF] mb-1.5 block">Odśwież</Label>
+            <button onClick={fetchDeviations} disabled={loading} className="h-8 px-3 w-full rounded-lg border border-[#E5E7EB] text-[12px] font-medium text-[#374151] hover:bg-[#F9FAFB] flex items-center justify-center gap-1.5 disabled:opacity-50">
+              {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
               Przeładuj
-            </Button>
+            </button>
           </div>
           <div>
-            <Label className="text-sm font-medium mb-2 block">Status</Label>
-            <div className="h-10 flex items-center text-sm">
-              {loading ? <span className="text-blue-600">Wczytywanie...</span> : <span className="text-green-600">✓ {deviations.length} rekordów</span>}
+            <Label className="text-[11px] font-semibold uppercase tracking-widest text-[#9CA3AF] mb-1.5 block">Status</Label>
+            <div className="h-8 flex items-center text-[12px]">
+              {loading
+                ? <span className="text-[#2563EB]">Wczytywanie...</span>
+                : <span className="text-[#16A34A] font-medium">{deviations.length} rekordów</span>
+              }
             </div>
           </div>
         </div>
       </div>
 
       <Tabs defaultValue="overview" className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="overview">Lista odchyleń</TabsTrigger>
-          <TabsTrigger value="details">Analiza szczegółowa</TabsTrigger>
-          <TabsTrigger value="trends">Trendy</TabsTrigger>
-        </TabsList>
-
-        {/* OVERVIEW TAB */}
-        <TabsContent value="overview" className="space-y-4">
-          {/* Summary Cards */}
-        <div className="grid grid-cols-4 gap-4">
-          <Card>
-            <CardContent className="pt-6">
-              <div className="text-sm text-gray-600">Suma wartoci odchyleń</div>
-              <div className="text-2xl font-bold text-orange-600">{totalDeviation.toFixed(0)} zł</div>
-              <div className="text-xs text-gray-500">za okres</div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="pt-6">
-              <div className="text-sm text-gray-600">🔴 Straty (niewytłumaczone)</div>
-              <div className="text-2xl font-bold text-red-600">{losses.toFixed(0)} zł</div>
-              <div className="text-xs text-gray-500">więcej niż oczekiwano</div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="pt-6">
-              <div className="text-sm text-gray-600">🟢 Nadwyżka</div>
-              <div className="text-2xl font-bold text-green-600">{surplus.toFixed(0)} zł</div>
-              <div className="text-xs text-gray-500">mniej niż zaplanowano</div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="pt-6">
-              <div className="text-sm text-gray-600">🔴 Krytyczne pozycje</div>
-              <div className="text-2xl font-bold text-red-600">{critical}</div>
-              <div className="text-xs text-gray-500">&gt;10% deviation</div>
-            </CardContent>
-          </Card>
+        <div className="border-b border-[#E5E7EB] mb-5">
+          <TabsList className="h-9 bg-transparent p-0 gap-1">
+            <TabsTrigger value="overview" className="h-8 px-3 text-[13px] rounded-md data-[state=active]:bg-[#EFF6FF] data-[state=active]:text-[#2563EB] data-[state=inactive]:text-[#6B7280]">Lista odchyleń</TabsTrigger>
+            <TabsTrigger value="details" className="h-8 px-3 text-[13px] rounded-md data-[state=active]:bg-[#EFF6FF] data-[state=active]:text-[#2563EB] data-[state=inactive]:text-[#6B7280]">Analiza szczegółowa</TabsTrigger>
+            <TabsTrigger value="trends" className="h-8 px-3 text-[13px] rounded-md data-[state=active]:bg-[#EFF6FF] data-[state=active]:text-[#2563EB] data-[state=inactive]:text-[#6B7280]">Trendy</TabsTrigger>
+          </TabsList>
         </div>
 
-        {/* Main Deviations Table */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle>Odchylenia składników</CardTitle>
-              <CardDescription>Zużycie teoretyczne vs rzeczywiste</CardDescription>
+        {/* OVERVIEW TAB */}
+        <TabsContent value="overview" className="space-y-4 mt-0">
+          <div className="grid grid-cols-4 gap-3">
+            <div className="bg-white border border-[#E5E7EB] rounded-lg p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-[#9CA3AF]">Suma odchyleń</p>
+              <p className="text-[22px] font-bold text-[#D97706] mt-1">{totalDeviation.toFixed(0)} zł</p>
+              <p className="text-[11px] text-[#6B7280] mt-0.5">za okres</p>
             </div>
-            <Button variant="outline" className="gap-2">
-              <Download size={16} />
-              Eksport
-            </Button>
-          </CardHeader>
-          <CardContent>
+            <div className="bg-white border border-[#E5E7EB] rounded-lg p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-[#9CA3AF]">Straty</p>
+              <p className="text-[22px] font-bold text-[#DC2626] mt-1">{losses.toFixed(0)} zł</p>
+              <p className="text-[11px] text-[#6B7280] mt-0.5">więcej niż oczekiwano</p>
+            </div>
+            <div className="bg-white border border-[#E5E7EB] rounded-lg p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-[#9CA3AF]">Nadwyżka</p>
+              <p className="text-[22px] font-bold text-[#16A34A] mt-1">{surplus.toFixed(0)} zł</p>
+              <p className="text-[11px] text-[#6B7280] mt-0.5">mniej niż zaplanowano</p>
+            </div>
+            <div className="bg-white border border-[#E5E7EB] rounded-lg p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-[#9CA3AF]">Krytyczne</p>
+              <p className="text-[22px] font-bold text-[#DC2626] mt-1">{critical}</p>
+              <p className="text-[11px] text-[#6B7280] mt-0.5">&gt;20% odchylenia</p>
+            </div>
+          </div>
+
+          <div className="bg-white border border-[#E5E7EB] rounded-lg overflow-hidden">
+            <div className="px-5 py-3 border-b border-[#E5E7EB] flex items-center justify-between">
+              <div>
+                <p className="text-[13px] font-semibold text-[#111827]">Odchylenia składników</p>
+                <p className="text-[11px] text-[#6B7280]">Zużycie teoretyczne vs rzeczywiste</p>
+              </div>
+              <button className="h-8 px-3 rounded-lg border border-[#E5E7EB] text-[12px] font-medium text-[#374151] hover:bg-[#F9FAFB] flex items-center gap-1.5">
+                <Download className="w-3.5 h-3.5" />
+                Eksport
+              </button>
+            </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-[12px]">
                 <thead>
-                  <tr className="border-b bg-gray-50">
-                    <th className="text-left p-3 font-semibold">Składnik</th>
-                    <th className="text-left p-3 font-semibold">Kategoria</th>
-                    <th className="text-right p-3 font-semibold">Teoretyczne</th>
-                    <th className="text-right p-3 font-semibold">Rzeczywiste</th>
-                    <th className="text-right p-3 font-semibold">Odchylenie</th>
-                    <th className="text-right p-3 font-semibold">%</th>
-                    <th className="text-right p-3 font-semibold">Wartość (zł)</th>
-                    <th className="text-center p-3 font-semibold">Status</th>
-                    <th className="p-3"></th>
+                  <tr className="text-[10px] font-semibold uppercase tracking-widest text-[#9CA3AF] border-b border-[#E5E7EB] bg-[#F9FAFB]">
+                    <th className="py-2.5 px-4 text-left">Składnik</th>
+                    <th className="pr-3 text-left">Kategoria</th>
+                    <th className="pr-3 text-right">Teoretyczne</th>
+                    <th className="pr-3 text-right">Rzeczywiste</th>
+                    <th className="pr-3 text-right">Odchylenie</th>
+                    <th className="pr-3 text-right">%</th>
+                    <th className="pr-3 text-right">Wartość (zł)</th>
+                    <th className="pr-4 text-center">Status</th>
+                    <th className="pr-3"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {deviations.map((dev) => (
-                    <tr key={dev.id} className="border-b hover:bg-gray-50">
-                      <td className="p-3 font-medium">{dev.ingredient}</td>
-                      <td className="p-3 text-gray-600">{dev.category}</td>
-                      <td className="p-3 text-right">12.4 kg</td>
-                      <td className="p-3 text-right font-semibold">
-                        {dev.theoreticalUse + dev.deviation} kg
-                      </td>
-                      <td className="p-3 text-right font-semibold">
-                        <span className={dev.type === 'positive' ? 'text-red-600' : 'text-green-600'}>
+                    <tr key={dev.id} className="border-b border-[#F3F4F6] hover:bg-[#F9FAFB]">
+                      <td className="py-2.5 px-4 font-semibold text-[#111827]">{dev.ingredient}</td>
+                      <td className="pr-3 text-[#6B7280]">{dev.category}</td>
+                      <td className="pr-3 text-right text-[#374151]">12.4 kg</td>
+                      <td className="pr-3 text-right font-semibold text-[#111827]">{dev.theoreticalUse + dev.deviation} kg</td>
+                      <td className="pr-3 text-right">
+                        <span className={dev.type === 'positive' ? 'font-semibold text-[#DC2626]' : 'font-semibold text-[#16A34A]'}>
                           {dev.type === 'positive' ? '+' : '−'}{Math.abs(dev.deviation).toFixed(1)} kg
                         </span>
                       </td>
-                      <td className="p-3 text-right">
-                        <span className={dev.deviationPct > 10 ? 'font-bold text-red-600' : 'text-gray-600'}>
+                      <td className="pr-3 text-right">
+                        <span className={dev.deviationPct > 10 ? 'font-bold text-[#DC2626]' : 'text-[#6B7280]'}>
                           {dev.type === 'positive' ? '+' : '−'}{dev.deviationPct.toFixed(1)}%
                         </span>
                       </td>
-                      <td className="p-3 text-right font-bold">{dev.valueZl.toFixed(0)} zł</td>
-                      <td className="p-3 text-center">{statusBadge(dev.status)}</td>
-                      <td className="p-3">
-                        <Button
-                          variant="ghost"
-                          size="sm"
+                      <td className="pr-3 text-right font-bold text-[#111827]">{dev.valueZl.toFixed(0)} zł</td>
+                      <td className="pr-4 py-2 text-center">{statusBadge(dev.status)}</td>
+                      <td className="pr-3">
+                        <button
+                          className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-[#F3F4F6] text-[#6B7280]"
                           onClick={() => {
                             setSelectedDeviation(selectedDeviation === dev.id ? null : dev.id)
                             setShowDetails(prev => ({ ...prev, [dev.id]: !prev[dev.id] }))
                           }}
                         >
                           <ChevronDown
-                            size={16}
+                            size={14}
                             className={`transition-transform ${showDetails[dev.id] ? 'rotate-180' : ''}`}
                           />
-                        </Button>
+                        </button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          </CardContent>
-        </Card>
-      </TabsContent>
+          </div>
+        </TabsContent>
 
-      {/* DETAILS TAB */}
-      <TabsContent value="details" className="space-y-4">
-        {deviations
-          .filter(d => d.status === 'critical')
-          .map((dev) => (
-            <Card key={dev.id} className="border-2 border-red-200">
-              <CardHeader className="bg-red-50">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <CardTitle className="flex items-center gap-2">
-                      🔴 {dev.ingredient}
-                      <span className="text-lg font-normal text-red-600">
-                        {dev.type === 'positive' ? '+' : '−'}{dev.deviationPct}%
-                      </span>
-                    </CardTitle>
-                    <CardDescription>
-                      Period 01–19.02.2026 | Deviation: {dev.type === 'positive' ? '+' : '−'}
-                      {Math.abs(dev.deviation).toFixed(1)} kg ({dev.valueZl.toFixed(0)} zł)
-                    </CardDescription>
-                  </div>
-                  {statusBadge(dev.status)}
+        {/* DETAILS TAB */}
+        <TabsContent value="details" className="space-y-4 mt-0">
+          {deviations.filter(d => d.status === 'critical').map((dev) => (
+            <div key={dev.id} className="bg-white border border-[#E5E7EB] rounded-lg overflow-hidden">
+              <div className="px-5 py-4 border-b border-[#E5E7EB] bg-[#FEF2F2] flex items-start justify-between">
+                <div>
+                  <p className="text-[14px] font-bold text-[#111827] flex items-center gap-2">
+                    {dev.ingredient}
+                    <span className="text-[13px] font-semibold text-[#DC2626]">
+                      {dev.type === 'positive' ? '+' : '−'}{dev.deviationPct.toFixed(1)}%
+                    </span>
+                  </p>
+                  <p className="text-[12px] text-[#6B7280] mt-0.5">
+                    Odchylenie: {dev.type === 'positive' ? '+' : '−'}{Math.abs(dev.deviation).toFixed(1)} kg ({dev.valueZl.toFixed(0)} zł)
+                  </p>
                 </div>
-              </CardHeader>
+                {statusBadge(dev.status)}
+              </div>
 
-              <CardContent className="pt-6 space-y-6">
-                {/* Usage Breakdown */}
+              <div className="p-5 space-y-5">
                 <div className="grid grid-cols-2 gap-4">
-                  <Card className="bg-blue-50">
-                    <CardHeader>
-                      <CardTitle className="text-base">Theoretical Consumption</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-2 text-sm">
-                        <div className="flex justify-between">
-                          <span>Grilled Salmon (48 pcs)</span>
-                          <span className="font-semibold">9.60 kg</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>Salmon Salad (14 pcs)</span>
-                          <span className="font-semibold">1.40 kg</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>Fish Soup (7 pcs)</span>
-                          <span className="font-semibold">1.40 kg</span>
-                        </div>
-                        <div className="border-t pt-2 flex justify-between font-bold">
-                          <span>TOTAL</span>
-                          <span>12.40 kg</span>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
+                  <div className="bg-[#EFF6FF] border border-[#BFDBFE] rounded-lg p-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-widest text-[#3B82F6] mb-3">Zużycie teoretyczne</p>
+                    <div className="space-y-1.5 text-[12px]">
+                      <div className="flex justify-between text-[#374151]"><span>Łosoś Grillowany (48 szt)</span><span className="font-semibold">9.60 kg</span></div>
+                      <div className="flex justify-between text-[#374151]"><span>Sałatka z łososiem (14 szt)</span><span className="font-semibold">1.40 kg</span></div>
+                      <div className="flex justify-between text-[#374151]"><span>Zupa rybna (7 szt)</span><span className="font-semibold">1.40 kg</span></div>
+                      <div className="border-t border-[#BFDBFE] pt-1.5 flex justify-between font-bold text-[#111827]"><span>RAZEM</span><span>12.40 kg</span></div>
+                    </div>
+                  </div>
 
-                  <Card className="bg-green-50">
-                    <CardHeader>
-                      <CardTitle className="text-base">Actual Consumption</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-2 text-sm">
-                        <div className="flex justify-between">
-                          <span>Opening stock (01.02)</span>
-                          <span className="font-semibold">8.20 kg</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>+ Delivery FV/2026/014</span>
-                          <span className="font-semibold">+10.00 kg</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>+ Delivery FV/2026/021</span>
-                          <span className="font-semibold">+8.00 kg</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>− Closing stock (19.02)</span>
-                          <span className="font-semibold">−1.10 kg</span>
-                        </div>
-                        <div className="border-t pt-2 flex justify-between font-bold">
-                          <span>ACTUAL USAGE</span>
-                          <span>15.10 kg</span>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-
-                {/* Possible Causes */}
-                <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
-                  <div className="flex gap-3">
-                    <AlertCircle className="text-yellow-700 flex-shrink-0 mt-0.5" size={18} />
-                    <div>
-                      <p className="font-semibold text-yellow-900 mb-2">
-                        Large deviation (+21.8%). Possible causes:
-                      </p>
-                      <ul className="list-disc pl-5 space-y-1 text-sm text-yellow-800">
-                        {possibleCauses(dev.ingredient).map((cause, idx) => (
-                          <li key={idx}>{cause}</li>
-                        ))}
-                      </ul>
+                  <div className="bg-[#F0FDF4] border border-[#BBF7D0] rounded-lg p-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-widest text-[#16A34A] mb-3">Zużycie rzeczywiste</p>
+                    <div className="space-y-1.5 text-[12px]">
+                      <div className="flex justify-between text-[#374151]"><span>Stan otwarcia (01.02)</span><span className="font-semibold">8.20 kg</span></div>
+                      <div className="flex justify-between text-[#374151]"><span>+ Dostawa FV/2026/014</span><span className="font-semibold">+10.00 kg</span></div>
+                      <div className="flex justify-between text-[#374151]"><span>+ Dostawa FV/2026/021</span><span className="font-semibold">+8.00 kg</span></div>
+                      <div className="flex justify-between text-[#374151]"><span>− Stan zamknięcia (19.02)</span><span className="font-semibold">−1.10 kg</span></div>
+                      <div className="border-t border-[#BBF7D0] pt-1.5 flex justify-between font-bold text-[#111827]"><span>ZUŻYCIE</span><span>15.10 kg</span></div>
                     </div>
                   </div>
                 </div>
 
-                {/* Explanation Notes */}
+                <div className="bg-[#FFFBEB] border border-[#F59E0B] rounded-lg p-4 flex gap-3">
+                  <AlertCircle className="text-[#D97706] shrink-0 mt-0.5 w-4 h-4" />
+                  <div className="text-[12px] text-[#92400E]">
+                    <p className="font-semibold mb-1">Duże odchylenie (+21.8%). Możliwe przyczyny:</p>
+                    <ul className="list-disc pl-4 space-y-0.5">
+                      {possibleCauses(dev.ingredient).map((cause, idx) => (
+                        <li key={idx}>{cause}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+
                 <div className="space-y-2">
-                  <Label className="font-semibold">Explanation Notes</Label>
+                  <p className="text-[11px] font-semibold uppercase tracking-widest text-[#9CA3AF]">Notatki wyjaśniające</p>
                   <Textarea
-                    placeholder="After speaking with kitchen staff... (this creates an audit trail)"
+                    placeholder="Po rozmowie z personelem kuchni... (tworzy ślad audytu)"
                     value={explanationNotes[dev.id] || ''}
                     onChange={(e) => setExplanationNotes({ ...explanationNotes, [dev.id]: e.target.value })}
                     rows={3}
+                    className="text-[13px]"
                   />
                   <div className="flex gap-2">
-                    <Button
+                    <button
                       onClick={() => {
                         onExplain?.(dev.id, explanationNotes[dev.id] || '')
                         setExplanationNotes({ ...explanationNotes, [dev.id]: '' })
                       }}
+                      className="h-8 px-4 rounded-lg bg-[#111827] text-white text-[12px] font-medium hover:bg-[#1F2937]"
                     >
-                      ✓ Mark as Explained
-                    </Button>
-                    <Button variant="outline">View History</Button>
+                      Oznacz jako wyjaśnione
+                    </button>
+                    <button className="h-8 px-4 rounded-lg border border-[#E5E7EB] text-[12px] font-medium text-[#374151] hover:bg-[#F9FAFB]">
+                      Historia
+                    </button>
                   </div>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           ))}
-      </TabsContent>
+        </TabsContent>
 
-      {/* TRENDS TAB */}
-      <TabsContent value="trends" className="space-y-4">
-        {deviations.length === 0 ? (
-          <Card>
-            <CardContent className="pt-6 text-center py-12">
-              <p className="text-gray-500">Brak danych odchyleń do wyświetlenia</p>
-            </CardContent>
-          </Card>
-        ) : (
-          <>
-            {/* Top Deviating Ingredients */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <TrendingUp size={20} />
-                  Top odchylenia
-                </CardTitle>
-                <CardDescription>Składniki z największymi odchyleniami w wybranym okresie</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
+        {/* TRENDS TAB */}
+        <TabsContent value="trends" className="space-y-4 mt-0">
+          {deviations.length === 0 ? (
+            <div className="bg-white border border-[#E5E7EB] rounded-lg py-12 text-center">
+              <p className="text-[13px] text-[#6B7280]">Brak danych odchyleń do wyświetlenia</p>
+            </div>
+          ) : (
+            <>
+              <div className="bg-white border border-[#E5E7EB] rounded-lg overflow-hidden">
+                <div className="px-5 py-3 border-b border-[#E5E7EB] flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-[#6B7280]" />
+                  <p className="text-[13px] font-semibold text-[#111827]">Top odchylenia</p>
+                </div>
+                <div className="p-5 space-y-4">
                   {deviations
                     .sort((a, b) => Math.abs(b.deviationPct) - Math.abs(a.deviationPct))
                     .slice(0, 5)
                     .map((dev, idx) => (
-                      <div key={dev.id} className="space-y-2">
+                      <div key={dev.id} className="space-y-1.5">
                         <div className="flex justify-between items-center">
                           <div className="flex items-center gap-2">
-                            <span className="font-bold text-lg text-gray-600">#{idx + 1}</span>
+                            <span className="text-[13px] font-bold text-[#9CA3AF] w-5">#{idx + 1}</span>
                             <div>
-                              <span className="font-semibold">{dev.ingredient}</span>
-                              <p className="text-xs text-gray-500">{dev.category}</p>
+                              <p className="text-[13px] font-semibold text-[#111827]">{dev.ingredient}</p>
+                              <p className="text-[11px] text-[#6B7280]">{dev.category}</p>
                             </div>
                           </div>
                           <div className="text-right">
-                            <span className={`text-sm font-bold ${dev.type === 'positive' ? 'text-red-600' : 'text-green-600'}`}>
+                            <p className={`text-[13px] font-bold ${dev.type === 'positive' ? 'text-[#DC2626]' : 'text-[#16A34A]'}`}>
                               {dev.type === 'positive' ? '+' : '−'}{dev.deviationPct.toFixed(1)}%
-                            </span>
-                            <p className="text-xs text-gray-500">{dev.type === 'positive' ? '+' : '−'}{Math.abs(dev.deviation).toFixed(1)} j.m.</p>
+                            </p>
+                            <p className="text-[11px] text-[#6B7280]">{dev.type === 'positive' ? '+' : '−'}{Math.abs(dev.deviation).toFixed(1)} j.m.</p>
                           </div>
                         </div>
-                        <div className="w-full bg-gray-200 rounded-full h-2">
-                          <div 
-                            className={`h-2 rounded-full transition-all ${
-                              dev.type === 'positive' 
-                                ? 'bg-red-500' 
-                                : 'bg-green-500'
-                            }`}
+                        <div className="w-full bg-[#F3F4F6] rounded-full h-1.5">
+                          <div
+                            className={`h-1.5 rounded-full ${dev.type === 'positive' ? 'bg-[#DC2626]' : 'bg-[#16A34A]'}`}
                             style={{ width: `${Math.min(dev.deviationPct, 100)}%` }}
                           />
                         </div>
-                        <p className={`text-xs ${dev.status === 'critical' ? 'text-red-600' : dev.status === 'warning' ? 'text-yellow-600' : 'text-green-600'}`}>
-                          {dev.status === 'critical' && '🔴 Krytyczne'}
-                          {dev.status === 'warning' && '🟠 Ostrzeżenie'}
-                          {dev.status === 'ok' && '🟢 OK'} 
+                        <p className={`text-[11px] ${dev.status === 'critical' ? 'text-[#DC2626]' : dev.status === 'warning' ? 'text-[#D97706]' : 'text-[#16A34A]'}`}>
+                          {dev.status === 'critical' && 'Krytyczne'}
+                          {dev.status === 'warning' && 'Ostrzeżenie'}
+                          {dev.status === 'ok' && 'W normie'}
                           {dev.type === 'positive' && ' — możliwa strata lub błąd receptury'}
                           {dev.type === 'negative' && ' — mniej zużycia niż oczekiwano'}
                         </p>
                       </div>
                     ))}
                 </div>
-              </CardContent>
-            </Card>
+              </div>
 
-            {/* Status Breakdown */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Podsumowanie statusów</CardTitle>
-                <CardDescription>Rozkład odchyleń wg kategorii ryzyka</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="text-center p-4 bg-red-50 rounded-lg border border-red-200">
-                    <div className="text-2xl font-bold text-red-600">
-                      {deviations.filter(d => d.status === 'critical').length}
-                    </div>
-                    <div className="text-sm text-red-700 font-semibold">Krytyczne</div>
-                    <div className="text-xs text-red-600 mt-1">
-                      {deviations.filter(d => d.status === 'critical').length > 0 
-                        ? `${((deviations.filter(d => d.status === 'critical').length / deviations.length) * 100).toFixed(0)}% składników`
-                        : 'Brak'}
-                    </div>
-                  </div>
-                  <div className="text-center p-4 bg-yellow-50 rounded-lg border border-yellow-200">
-                    <div className="text-2xl font-bold text-yellow-600">
-                      {deviations.filter(d => d.status === 'warning').length}
-                    </div>
-                    <div className="text-sm text-yellow-700 font-semibold">Ostrzeżenia</div>
-                    <div className="text-xs text-yellow-600 mt-1">
-                      {deviations.filter(d => d.status === 'warning').length > 0
-                        ? `${((deviations.filter(d => d.status === 'warning').length / deviations.length) * 100).toFixed(0)}% składników`
-                        : 'Brak'}
-                    </div>
-                  </div>
-                  <div className="text-center p-4 bg-green-50 rounded-lg border border-green-200">
-                    <div className="text-2xl font-bold text-green-600">
-                      {deviations.filter(d => d.status === 'ok').length}
-                    </div>
-                    <div className="text-sm text-green-700 font-semibold">W normie</div>
-                    <div className="text-xs text-green-600 mt-1">
-                      {deviations.filter(d => d.status === 'ok').length > 0
-                        ? `${((deviations.filter(d => d.status === 'ok').length / deviations.length) * 100).toFixed(0)}% składników`
-                        : 'Brak'}
-                    </div>
-                  </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-white border border-[#E5E7EB] rounded-lg p-4 text-center">
+                  <p className="text-[22px] font-bold text-[#DC2626]">{deviations.filter(d => d.status === 'critical').length}</p>
+                  <p className="text-[12px] font-semibold text-[#DC2626] mt-0.5">Krytyczne</p>
+                  <p className="text-[11px] text-[#6B7280] mt-0.5">
+                    {deviations.filter(d => d.status === 'critical').length > 0
+                      ? `${((deviations.filter(d => d.status === 'critical').length / deviations.length) * 100).toFixed(0)}% składników`
+                      : 'Brak'}
+                  </p>
                 </div>
-              </CardContent>
-            </Card>
+                <div className="bg-white border border-[#E5E7EB] rounded-lg p-4 text-center">
+                  <p className="text-[22px] font-bold text-[#D97706]">{deviations.filter(d => d.status === 'warning').length}</p>
+                  <p className="text-[12px] font-semibold text-[#D97706] mt-0.5">Ostrzeżenia</p>
+                  <p className="text-[11px] text-[#6B7280] mt-0.5">
+                    {deviations.filter(d => d.status === 'warning').length > 0
+                      ? `${((deviations.filter(d => d.status === 'warning').length / deviations.length) * 100).toFixed(0)}% składników`
+                      : 'Brak'}
+                  </p>
+                </div>
+                <div className="bg-white border border-[#E5E7EB] rounded-lg p-4 text-center">
+                  <p className="text-[22px] font-bold text-[#16A34A]">{deviations.filter(d => d.status === 'ok').length}</p>
+                  <p className="text-[12px] font-semibold text-[#16A34A] mt-0.5">W normie</p>
+                  <p className="text-[11px] text-[#6B7280] mt-0.5">
+                    {deviations.filter(d => d.status === 'ok').length > 0
+                      ? `${((deviations.filter(d => d.status === 'ok').length / deviations.length) * 100).toFixed(0)}% składników`
+                      : 'Brak'}
+                  </p>
+                </div>
+              </div>
 
-            {/* Type Breakdown */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Typ odchyleń</CardTitle>
-                <CardDescription>Rozkład strat vs nadwyżek</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="p-4 bg-red-50 rounded-lg border border-red-200">
-                    <div className="text-lg font-bold text-red-600">
-                      {deviations.filter(d => d.type === 'positive').length}
-                    </div>
-                    <div className="text-sm text-red-700 font-semibold">Straty/Nadmierne zużycie</div>
-                    <div className="text-xs text-red-600 mt-2">
-                      Łącznie: {deviations
-                        .filter(d => d.type === 'positive')
-                        .reduce((sum, d) => sum + d.valueZl, 0)
-                        .toFixed(0)} zł
-                    </div>
-                  </div>
-                  <div className="p-4 bg-green-50 rounded-lg border border-green-200">
-                    <div className="text-lg font-bold text-green-600">
-                      {deviations.filter(d => d.type === 'negative').length}
-                    </div>
-                    <div className="text-sm text-green-700 font-semibold">Nadwyżki/Mniej zużycia</div>
-                    <div className="text-xs text-green-600 mt-2">
-                      Łącznie: {Math.abs(deviations
-                        .filter(d => d.type === 'negative')
-                        .reduce((sum, d) => sum + d.valueZl, 0))
-                        .toFixed(0)} zł
-                    </div>
-                  </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-white border border-[#E5E7EB] rounded-lg p-4">
+                  <p className="text-[22px] font-bold text-[#DC2626]">{deviations.filter(d => d.type === 'positive').length}</p>
+                  <p className="text-[12px] font-semibold text-[#DC2626] mt-0.5">Straty / Nadmierne zużycie</p>
+                  <p className="text-[12px] text-[#6B7280] mt-1">
+                    Łącznie: {deviations.filter(d => d.type === 'positive').reduce((sum, d) => sum + d.valueZl, 0).toFixed(0)} zł
+                  </p>
                 </div>
-              </CardContent>
-            </Card>
-          </>
-        )}
-      </TabsContent>
+                <div className="bg-white border border-[#E5E7EB] rounded-lg p-4">
+                  <p className="text-[22px] font-bold text-[#16A34A]">{deviations.filter(d => d.type === 'negative').length}</p>
+                  <p className="text-[12px] font-semibold text-[#16A34A] mt-0.5">Nadwyżki / Mniej zużycia</p>
+                  <p className="text-[12px] text-[#6B7280] mt-1">
+                    Łącznie: {Math.abs(deviations.filter(d => d.type === 'negative').reduce((sum, d) => sum + d.valueZl, 0)).toFixed(0)} zł
+                  </p>
+                </div>
+              </div>
+            </>
+          )}
+        </TabsContent>
       </Tabs>
     </div>
   )

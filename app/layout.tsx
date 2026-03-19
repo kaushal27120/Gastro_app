@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
-import { Geist } from "next/font/google";
-import { ThemeProvider } from "next-themes";
+import { Inter } from "next/font/google";
 import "./globals.css";
 
 const defaultUrl = process.env.VERCEL_URL
@@ -9,14 +8,14 @@ const defaultUrl = process.env.VERCEL_URL
 
 export const metadata: Metadata = {
   metadataBase: new URL(defaultUrl),
-  title: "Gastro MVP - System Zarządzania Restauracją",
-  description: "Kompleksowy system zarządzania restauracją z funkcjami inwentaryzacji, raportowania i analizy kosztów",
+  title: "OneLink — Restaurant Management",
+  description: "Professional restaurant management platform by OneLink",
 };
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const inter = Inter({
+  variable: "--font-inter",
   display: "swap",
-  subsets: ["latin"],
+  subsets: ["latin", "latin-ext"],
 });
 
 export default function RootLayout({
@@ -26,15 +25,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="pl" suppressHydrationWarning>
-      <body className={`${geistSans.className} antialiased`}>
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
-        >
-          {children}
-        </ThemeProvider>
+      <body className={`${inter.variable} font-sans antialiased bg-[#F7F8FA] text-[#111827]`}>
+        {children}
       </body>
     </html>
   );

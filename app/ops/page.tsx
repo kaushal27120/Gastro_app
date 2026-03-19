@@ -4,6 +4,8 @@ import { useState, useEffect, useMemo } from 'react'
 import { createClient } from '../supabase-client'
 import { useRouter } from 'next/navigation'
 import { OpsSidebar } from '@/components/OpsSidebar'
+import { ScheduleGrid } from '@/components/schedule-grid'
+import { EmployeesManager } from '@/components/employees-manager'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import IngredientAutocomplete from '@/components/ingredient-autocomplete'
@@ -25,7 +27,7 @@ type LocationData = {
   location_id: string
   locations: { name: string; id: string; company_id: string }
 }
-type Employee = { id: string; full_name: string; real_hour_cost: number | null }
+type Employee = { id: string; full_name: string; real_hour_cost: number | null; base_rate?: number | null; user_id?: string | null; phone?: string | null; position?: string | null; email?: string | null; status?: string }
 type EmployeeRow = { employee_id: string; hours: string }
 type ValidationError = { field: string; message: string }
 type InvoiceLineItem = {
@@ -58,7 +60,15 @@ type SemisReconciliationEntry = {
   status: 'pending' | 'submitted'
 }
 
-type ActiveView = 'reporting' | 'invoices' | 'inventory'
+type ActiveView = 'reporting' | 'invoices' | 'inventory' | 'scheduling' | 'employees'
+type ShiftCell = {
+  id?: string
+  user_id: string
+  date: string
+  position: string
+  time_start: string
+  time_end: string
+}
 
 /* ================================================================== */
 /* CONSTANTS                                                           */
@@ -141,6 +151,27 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   correction: { label: 'Do korekty', color: 'bg-red-100 text-red-700' },
 }
 
+const getWeekStartMonday = (isoDate: string) => {
+  const d = new Date(isoDate)
+  const day = d.getDay() || 7 // Sunday as 7
+  d.setDate(d.getDate() - (day - 1))
+  return d.toISOString().split('T')[0]
+}
+
+const buildWeekDays = (weekStart: string): { iso: string; label: string }[] => {
+  if (!weekStart) return []
+  const start = new Date(weekStart)
+  const days: { iso: string; label: string }[] = []
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(start)
+    d.setDate(start.getDate() + i)
+    const iso = d.toISOString().split('T')[0]
+    const label = d.toLocaleDateString('pl-PL', { weekday: 'short', day: '2-digit', month: '2-digit' })
+    days.push({ iso, label })
+  }
+  return days
+}
+
 /* ================================================================== */
 /* COMPONENT                                                           */
 /* ================================================================== */
@@ -157,6 +188,7 @@ export default function OpsDashboard() {
   const [activeView, setActiveView] = useState<ActiveView>('reporting')
   const [reportDate, setReportDate] = useState('')
   const [isReadOnly, setIsReadOnly] = useState(false)
+  const [scheduleWeekStart, setScheduleWeekStart] = useState('')
 
   // ── Closing person ──
   const [closingPersonName, setClosingPersonName] = useState('')
@@ -165,6 +197,8 @@ export default function OpsDashboard() {
   // ── Employees (reporting) ──
   const [employees, setEmployees] = useState<Employee[]>([])
   const [employeeRows, setEmployeeRows] = useState<EmployeeRow[]>([{ employee_id: '', hours: '' }])
+  const [shiftMatrix, setShiftMatrix] = useState<Record<string, ShiftCell>>({})
+  const [newWorker, setNewWorker] = useState({ full_name: '', real_hour_cost: '', user_email: '' })
 
   // ── Sales form ──
   const [salesForm, setSalesForm] = useState({
@@ -222,12 +256,13 @@ export default function OpsDashboard() {
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0]
     setReportDate(today)
+    setScheduleWeekStart(getWeekStartMonday(today))
     setInvoiceCommon(p => ({ ...p, saleDate: today, receiptDate: today }))
     setNewSemisEntry(p => ({ ...p, invoice_date: today }))
 
     const init = async () => {
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { router.push('/login'); return }
+      if (!user) { router.push('/auth/login'); return }
       setClosingPersonEmail(user.email || '')
       setUserId(user.id)
 
@@ -257,7 +292,7 @@ export default function OpsDashboard() {
   // LOAD: Reporting data
   // ═══════════════════════════════════════════════════════════════════
   useEffect(() => {
-    if (!selectedLocation || !reportDate || activeView !== 'reporting') return
+    if (!selectedLocation || !reportDate) return
     const fetch = async () => {
       const { data } = await supabase.from('sales_daily').select('*')
         .eq('location_id', selectedLocation.location_id).eq('date', reportDate).single()
@@ -292,13 +327,19 @@ export default function OpsDashboard() {
         setExistingReportId(null)
       }
 
+      // Try to include user_id (available after migration 202603170004)
       const { data: emps } = await supabase.from('employees')
-        .select('id, full_name, real_hour_cost, status')
+        .select('id, full_name, real_hour_cost, base_rate, status, user_id, phone, position, email')
         .eq('location_id', selectedLocation.location_id)
+        .neq('status', 'inactive')
       if (emps) {
-        setEmployees(emps.filter((e: any) => e.status !== 'nieaktywny')
-          .map((e: any) => ({ id: e.id, full_name: e.full_name, real_hour_cost: e.real_hour_cost })))
-      } else setEmployees([])
+        setEmployees(emps.map((e: any) => ({
+          id: e.id, full_name: e.full_name,
+          real_hour_cost: e.real_hour_cost, base_rate: e.base_rate ?? null,
+          user_id: e.user_id ?? null, phone: e.phone ?? null,
+          position: e.position ?? null, email: e.email ?? null, status: e.status,
+        })))
+      }
 
       const { data: hrs } = await supabase.from('employee_daily_hours')
         .select('employee_id, hours')
@@ -344,6 +385,49 @@ export default function OpsDashboard() {
     }
     fetchInventory()
   }, [selectedLocation, activeView, supabase, inventorySubView])
+
+  // ═══════════════════════════════════════════════════════════════════
+  // LOAD: Scheduling data (shifts)
+  // ═══════════════════════════════════════════════════════════════════
+  useEffect(() => {
+    if (!selectedLocation || !scheduleWeekStart || activeView !== 'scheduling') return
+    const fetchShifts = async () => {
+      const start = scheduleWeekStart
+      const startDate = new Date(start)
+      const endDate = new Date(start)
+      endDate.setDate(startDate.getDate() + 6)
+      const end = endDate.toISOString().split('T')[0]
+
+      const { data } = await supabase
+        .from('shifts')
+        .select('id, user_id, date, time_start, time_end, position')
+        .eq('location_id', selectedLocation.location_id)
+        .gte('date', start)
+        .lte('date', end)
+        .order('date', { ascending: true })
+        .order('time_start', { ascending: true })
+
+      if (data) {
+        const map: Record<string, ShiftCell> = {}
+        data.forEach((s: any) => {
+          const d = s.date
+          const key = `${s.user_id}__${d}`
+          map[key] = {
+            id: s.id,
+            user_id: s.user_id,
+            date: d,
+            position: s.position || '',
+            time_start: s.time_start?.slice(0, 5) || '',
+            time_end: s.time_end?.slice(0, 5) || '',
+          }
+        })
+        setShiftMatrix(map)
+      } else {
+        setShiftMatrix({})
+      }
+    }
+    fetchShifts()
+  }, [selectedLocation, scheduleWeekStart, activeView, supabase])
 
   // ═══════════════════════════════════════════════════════════════════
   // LOAD: SEMIS Reconciliation entries
@@ -797,6 +881,65 @@ export default function OpsDashboard() {
     setJobItems(prev => prev.map(i => i.id === id ? { ...i, [field]: val } : i))
   }
 
+  const handleAddWorker = async () => {
+    if (!selectedLocation) return
+    const name = newWorker.full_name.trim()
+    if (!name) {
+      alert('Podaj imię i nazwisko pracownika')
+      return
+    }
+
+    // Insert employee (without user_id — linked separately via the link-employee API after migration)
+    const { data: newEmp, error } = await supabase.from('employees').insert({
+      location_id: selectedLocation.location_id,
+      full_name: name,
+      real_hour_cost: newWorker.real_hour_cost ? Number(newWorker.real_hour_cost) : null,
+      status: 'active',
+    }).select('id').single()
+
+    if (error) {
+      alert('Błąd podczas dodawania pracownika: ' + error.message)
+      return
+    }
+
+    // If email provided, link via admin API (works after migration adds user_id to employees)
+    const email = newWorker.user_email.trim()
+    if (email && newEmp?.id) {
+      const res = await fetch('/api/admin/link-employee', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, employee_id: newEmp.id }),
+      })
+      if (!res.ok) {
+        const { error: linkErr } = await res.json()
+        // Non-fatal: employee added, just not linked to login account yet
+        console.warn('Link employee warning:', linkErr)
+      }
+    }
+
+    setNewWorker({ full_name: '', real_hour_cost: '', user_email: '' })
+
+    const { data: emps, error: reloadErr } = await supabase.from('employees')
+      .select('id, full_name, real_hour_cost, status, user_id')
+      .eq('location_id', selectedLocation.location_id)
+      .neq('status', 'inactive')
+    if (!reloadErr && emps) {
+      setEmployees(emps.map((e: any) => ({
+        id: e.id, full_name: e.full_name,
+        real_hour_cost: e.real_hour_cost, user_id: e.user_id ?? null,
+      })))
+    } else {
+      const { data: emps2 } = await supabase.from('employees')
+        .select('id, full_name, real_hour_cost, status')
+        .eq('location_id', selectedLocation.location_id)
+        .neq('status', 'inactive')
+      setEmployees((emps2 ?? []).map((e: any) => ({
+        id: e.id, full_name: e.full_name,
+        real_hour_cost: e.real_hour_cost, user_id: null,
+      })))
+    }
+  }
+
   const saveInventoryDraft = async () => {
     if (!selectedJob) return
     setInventorySaving(true)
@@ -854,6 +997,14 @@ export default function OpsDashboard() {
   const removeEmployeeRow = (i: number) => setEmployeeRows(p => p.length > 1 ? p.filter((_, idx) => idx !== i) : p)
   const updateEmployeeRow = (i: number, f: 'employee_id' | 'hours', v: string) =>
     setEmployeeRows(p => { const c = [...p]; c[i] = { ...c[i], [f]: v }; return c })
+  const updateShiftCell = (userId: string, date: string, field: keyof ShiftCell, value: string) => {
+    setShiftMatrix(prev => {
+      const key = `${userId}__${date}`
+      const existing = prev[key] || { id: undefined, user_id: userId, date, position: '', time_start: '', time_end: '' }
+      const updated: ShiftCell = { ...existing, [field]: value }
+      return { ...prev, [key]: updated }
+    })
+  }
   const addCosLine = () => setCosLineItems(p => [...p, { ...emptyLineItem }])
   const removeCosLine = (i: number) => setCosLineItems(p => p.length > 1 ? p.filter((_, idx) => idx !== i) : p)
   const updateCosLine = (i: number, f: keyof InvoiceLineItem, v: string) =>
@@ -872,12 +1023,53 @@ export default function OpsDashboard() {
           <Button key={i} variant="outline" className="h-20 text-lg border-2" onClick={() => setSelectedLocation(item)}>📍 {item.locations.name}</Button>
         ))}
       </div>
-      <Button variant="ghost" className="mt-8 text-slate-500" onClick={async () => { await supabase.auth.signOut(); router.push('/login') }}>Wyloguj</Button>
+      <Button variant="ghost" className="mt-8 text-slate-500" onClick={async () => { await supabase.auth.signOut(); router.push('/auth/login') }}>Wyloguj</Button>
     </div>
   )
 
   const kpiColor = laborPercent < 0.27 ? 'text-green-700' : laborPercent <= 0.3 ? 'text-yellow-700' : laborPercent <= 0.4 ? 'text-orange-600' : 'text-red-700'
   const cashDiffColor = Math.abs(cashDiff) < 0.01 ? 'text-green-700' : 'text-red-700'
+  const scheduleWeekDays = buildWeekDays(scheduleWeekStart)
+
+  const saveSchedule = async () => {
+    if (!selectedLocation || !scheduleWeekStart || scheduleWeekDays.length === 0) return
+
+    const start = scheduleWeekStart
+    const end = scheduleWeekDays[scheduleWeekDays.length - 1].iso
+
+    // Remove existing shifts for this location/week and insert current set
+    await supabase
+      .from('shifts')
+      .delete()
+      .eq('location_id', selectedLocation.location_id)
+      .gte('date', start)
+      .lte('date', end)
+
+    const allCells = Object.values(shiftMatrix)
+    const validCells = allCells.filter(c => c.user_id && c.date && c.time_start && c.time_end)
+
+    if (validCells.length === 0) {
+      setShiftMatrix({})
+      return
+    }
+
+    const payload = validCells.map(c => ({
+      user_id: c.user_id,
+      location_id: selectedLocation.location_id,
+      date: c.date,
+      time_start: c.time_start,
+      time_end: c.time_end,
+      position: c.position || null,
+    }))
+
+    const { error } = await supabase.from('shifts').insert(payload)
+    if (error) {
+      alert('Błąd podczas zapisywania harmonogramu: ' + error.message)
+      return
+    }
+
+    alert('✅ Harmonogram tygodniowy zapisany')
+  }
 
   return (
     <div className="flex min-h-screen bg-gray-50 font-sans">
@@ -885,11 +1077,36 @@ export default function OpsDashboard() {
         locationName={selectedLocation.locations.name}
         activeView={activeView}
         onNavigate={(v: string) => setActiveView(v as ActiveView)}
-        onLogout={async () => { await supabase.auth.signOut(); router.push('/login') }}
+        onLogout={async () => { await supabase.auth.signOut(); router.push('/auth/login') }}
         onSwitchLocation={() => setSelectedLocation(null)}
       />
 
       <main className="flex-1 ml-64 p-12">
+
+        {/* ╔══════════════════════════════════════════════════════════╗ */}
+        {/* ║  0. SCHEDULING (WEEKLY GRID)                            ║ */}
+        {/* ╚══════════════════════════════════════════════════════════╝ */}
+        {activeView === 'scheduling' && (
+          <div className="max-w-full">
+            <ScheduleGrid
+              locationId={selectedLocation?.location_id}
+              employees={employees.map(e => ({ id: e.id, full_name: e.full_name, real_hour_cost: e.real_hour_cost, base_rate: e.base_rate ?? null, user_id: e.user_id ?? null, position: e.position ?? null, phone: e.phone ?? null }))}
+              supabase={supabase}
+            />
+          </div>
+        )}
+
+        {/* ╔══════════════════════════════════════════════════════════╗ */}
+        {/* ║  EMPLOYEES                                              ║ */}
+        {/* ╚══════════════════════════════════════════════════════════╝ */}
+        {activeView === 'employees' && selectedLocation && (
+          <EmployeesManager
+            supabase={supabase}
+            companyId={selectedLocation.locations?.company_id ?? ''}
+            locations={[{ id: selectedLocation.location_id, name: selectedLocation.locations?.name ?? '' }]}
+            defaultLocationId={selectedLocation.location_id}
+          />
+        )}
 
         {/* ╔══════════════════════════════════════════════════════════╗ */}
         {/* ║  1. DAILY REPORTING                                      ║ */}

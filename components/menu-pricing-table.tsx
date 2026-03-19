@@ -62,14 +62,14 @@ export function MenuPricingTable({
 
   const statusBadge = (status: 'ok' | 'warning' | 'critical') => {
     const badges = {
-      ok: { emoji: '🟢', text: 'OK', bg: 'bg-green-50', text_color: 'text-green-700' },
-      warning: { emoji: '🟡', text: 'Warning', bg: 'bg-yellow-50', text_color: 'text-yellow-700' },
-      critical: { emoji: '🔴', text: 'Critical', bg: 'bg-red-50', text_color: 'text-red-700' },
+      ok: { text: 'OK', cls: 'bg-[#F0FDF4] text-[#16A34A]' },
+      warning: { text: 'Uwaga', cls: 'bg-[#FFFBEB] text-[#D97706]' },
+      critical: { text: 'Krytyczny', cls: 'bg-[#FEF2F2] text-[#DC2626]' },
     }
     const badge = badges[status]
     return (
-      <span className={`px-2 py-1 rounded-full text-xs font-semibold ${badge.bg} ${badge.text_color}`}>
-        {badge.emoji} {badge.text}
+      <span className={`px-2 py-0.5 rounded-md text-[11px] font-semibold ${badge.cls}`}>
+        {badge.text}
       </span>
     )
   }
@@ -80,237 +80,183 @@ export function MenuPricingTable({
 
   return (
     <Tabs defaultValue="overview" className="w-full">
-      <TabsList className="grid w-full grid-cols-2">
-        <TabsTrigger value="overview">Przegląd wyceny menu</TabsTrigger>
-        <TabsTrigger value="simulation">Symulator wariantów</TabsTrigger>
-      </TabsList>
+      <div className="border-b border-[#E5E7EB] mb-5">
+        <TabsList className="h-9 bg-transparent p-0 gap-1">
+          <TabsTrigger value="overview" className="h-8 px-3 text-[13px] rounded-md data-[state=active]:bg-[#EFF6FF] data-[state=active]:text-[#2563EB] data-[state=inactive]:text-[#6B7280]">Przegląd wyceny menu</TabsTrigger>
+          <TabsTrigger value="simulation" className="h-8 px-3 text-[13px] rounded-md data-[state=active]:bg-[#EFF6FF] data-[state=active]:text-[#2563EB] data-[state=inactive]:text-[#6B7280]">Symulator wariantów</TabsTrigger>
+        </TabsList>
+      </div>
 
       {/* OVERVIEW TAB */}
-      <TabsContent value="overview" className="space-y-4">
+      <TabsContent value="overview" className="space-y-4 mt-0">
         {/* Filters */}
-        <div className="bg-white p-4 rounded-lg border space-y-4">
-          <div className="flex gap-4 items-end">
-            <div className="flex-1">
-              <Label className="text-sm font-medium mb-2 block">Kategoria</Label>
-              <Select value={selectedCategory} onValueChange={setSelectedCategory}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {categories.map(cat => (
-                    <SelectItem key={cat} value={cat}>
-                      {cat === 'all' ? 'Wszystkie kategorie' : cat}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+        <div className="flex gap-2">
+          <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+            <SelectTrigger className="h-8 w-48 text-[13px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {categories.map(cat => (
+                <SelectItem key={cat} value={cat}>{cat === 'all' ? 'Wszystkie kategorie' : cat}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={sortBy} onValueChange={(v: any) => setSortBy(v)}>
+            <SelectTrigger className="h-8 w-44 text-[13px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="name">Sortuj: Nazwa</SelectItem>
+              <SelectItem value="foodcost">Sortuj: Koszt prod. %</SelectItem>
+              <SelectItem value="margin">Sortuj: Marża %</SelectItem>
+            </SelectContent>
+          </Select>
+          <button onClick={() => setShowProblematic(!showProblematic)}
+            className={`h-8 px-3 text-[12px] font-medium rounded-lg border flex items-center gap-1.5 transition-colors ${showProblematic ? 'bg-[#111827] text-white border-[#111827]' : 'bg-white text-[#6B7280] border-[#E5E7EB] hover:text-[#111827]'}`}>
+            <Filter size={13} />Tylko problematyczne
+          </button>
+        </div>
 
-            <div className="flex-1">
-              <Label className="text-sm font-medium mb-2 block">Sortuj wg</Label>
-              <Select value={sortBy} onValueChange={(v: any) => setSortBy(v)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="name">Nazwa</SelectItem>
-                  <SelectItem value="foodcost">Koszt produkcji %</SelectItem>
-                  <SelectItem value="margin">Marża %</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <Button
-              variant={showProblematic ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setShowProblematic(!showProblematic)}
-              className="gap-2"
-            >
-              <Filter size={16} />
-              Tylko problematyczne
-            </Button>
-
-            <Button variant="outline" size="sm" className="gap-2">
-              <Download size={16} />
-              Eksport
-            </Button>
+        {/* Summary tiles */}
+        <div className="grid grid-cols-4 gap-3">
+          <div className="bg-white border border-[#E5E7EB] rounded-lg p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-[#9CA3AF]">Średni koszt prod.</p>
+            <p className="text-[22px] font-bold text-[#2563EB] mt-1">
+              {filteredDishes.length ? (filteredDishes.reduce((a, d) => a + d.foodCostPct, 0) / filteredDishes.length).toFixed(1) : '—'}%
+            </p>
+          </div>
+          <div className="bg-white border border-[#E5E7EB] rounded-lg p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-[#9CA3AF]">Średnia marża</p>
+            <p className="text-[22px] font-bold text-[#16A34A] mt-1">
+              {filteredDishes.length ? (filteredDishes.reduce((a, d) => a + d.marginPct, 0) / filteredDishes.length).toFixed(1) : '—'}%
+            </p>
+          </div>
+          <div className="bg-white border border-[#E5E7EB] rounded-lg p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-[#9CA3AF]">Problematyczne</p>
+            <p className="text-[22px] font-bold text-[#DC2626] mt-1">{filteredDishes.filter(d => d.status !== 'ok').length}</p>
+          </div>
+          <div className="bg-white border border-[#E5E7EB] rounded-lg p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-[#9CA3AF]">Razem dań</p>
+            <p className="text-[22px] font-bold text-[#111827] mt-1">{filteredDishes.length}</p>
           </div>
         </div>
 
-        {/* Summary Cards */}
-        <div className="grid grid-cols-4 gap-4">
-          <Card>
-            <CardContent className="pt-6">
-              <div className="text-sm text-gray-600">Średni koszt produkcji</div>
-              <div className="text-2xl font-bold text-blue-600">
-                {(filteredDishes.reduce((a, d) => a + d.foodCostPct, 0) / filteredDishes.length).toFixed(1)}%
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="pt-6">
-              <div className="text-sm text-gray-600">Średnia marża</div>
-              <div className="text-2xl font-bold text-green-600">
-                {(filteredDishes.reduce((a, d) => a + d.marginPct, 0) / filteredDishes.length).toFixed(1)}%
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="pt-6">
-              <div className="text-sm text-gray-600">Problematyczne dania</div>
-              <div className="text-2xl font-bold text-red-600">
-                {filteredDishes.filter(d => d.status !== 'ok').length}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="pt-6">
-              <div className="text-sm text-gray-600">Razem dań</div>
-              <div className="text-2xl font-bold text-gray-900">{filteredDishes.length}</div>
-            </CardContent>
-          </Card>
-        </div>
-
         {/* Main Table */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Szczegóły wyceny menu</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-gray-50">
-                    <th className="text-left p-3 font-semibold">Nazwa dania</th>
-                    <th className="text-left p-3 font-semibold">Koszt produkcji</th>
-                    <th className="text-left p-3 font-semibold">Cena menu</th>
-                    <th className="text-left p-3 font-semibold">Koszt prod. %</th>
-                    <th className="text-left p-3 font-semibold">Marża / porcja</th>
-                    <th className="text-left p-3 font-semibold">Marża %</th>
-                    <th className="text-left p-3 font-semibold">Cel</th>
-                    <th className="text-center p-3 font-semibold">Status</th>
+        <div className="bg-white border border-[#E5E7EB] rounded-lg overflow-hidden">
+          <div className="px-5 py-3 border-b border-[#E5E7EB]">
+            <p className="text-[13px] font-semibold text-[#111827]">Szczegóły wyceny menu</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[12px]">
+              <thead>
+                <tr className="text-[10px] font-semibold uppercase tracking-widest text-[#9CA3AF] border-b border-[#E5E7EB] bg-[#F9FAFB]">
+                  <th className="py-2.5 px-4 text-left">Danie</th>
+                  <th className="pr-3 text-right">Koszt prod.</th>
+                  <th className="pr-3 text-right">Cena menu</th>
+                  <th className="pr-3 text-right">Koszt %</th>
+                  <th className="pr-3 text-right">Marża / porcja</th>
+                  <th className="pr-3 text-right">Marża %</th>
+                  <th className="pr-3 text-right">Cel</th>
+                  <th className="pr-4 text-center">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredDishes.map((dish) => (
+                  <tr key={dish.id} className="border-b border-[#F3F4F6] hover:bg-[#F9FAFB]">
+                    <td className="py-2.5 px-4 font-semibold text-[#111827]">{dish.name}</td>
+                    <td className="pr-3 text-right text-[#374151]">{dish.productionCost.toFixed(2)} zł</td>
+                    <td className="pr-3 text-right font-semibold text-[#111827]">{dish.menuPrice.toFixed(2)} zł</td>
+                    <td className="pr-3 text-right">
+                      <span className={`font-semibold ${dish.foodCostPct > 35 ? 'text-[#DC2626]' : 'text-[#16A34A]'}`}>
+                        {dish.foodCostPct.toFixed(1)}%
+                      </span>
+                    </td>
+                    <td className="pr-3 text-right font-semibold text-[#16A34A]">{dish.marginPerServing.toFixed(2)} zł</td>
+                    <td className="pr-3 text-right font-semibold text-[#111827]">{dish.marginPct.toFixed(1)}%</td>
+                    <td className="pr-3 text-right text-[#6B7280]">{dish.marginGoal}%</td>
+                    <td className="pr-4 py-2 text-center">{statusBadge(dish.status)}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {filteredDishes.map((dish) => (
-                    <tr key={dish.id} className="border-b hover:bg-gray-50">
-                      <td className="p-3 font-medium">{dish.name}</td>
-                      <td className="p-3">{dish.productionCost.toFixed(2)} zł</td>
-                      <td className="p-3 font-semibold">{dish.menuPrice.toFixed(2)} zł</td>
-                      <td className="p-3">
-                        <span className={dish.foodCostPct > 35 ? 'text-red-600 font-semibold' : 'text-green-600'}>
-                          {dish.foodCostPct.toFixed(1)}%
-                        </span>
-                      </td>
-                      <td className="p-3 text-green-600 font-semibold">
-                        {dish.marginPerServing.toFixed(2)} zł
-                      </td>
-                      <td className="p-3 font-semibold">{dish.marginPct.toFixed(1)}%</td>
-                      <td className="p-3 text-gray-600">{dish.marginGoal}%</td>
-                      <td className="p-3 text-center">{statusBadge(dish.status)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </TabsContent>
 
       {/* SIMULATION TAB */}
-      <TabsContent value="simulation" className="space-y-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>Co będzie jeśli zmieni się cena składnika</CardTitle>
-            <CardDescription>
-              Symuluj wpływ zmiany ceny na wszystkie dania zawierające ten składnik
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label className="text-sm font-medium mb-2 block">Wybierz składnik</Label>
-                <Select>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Wybierz składnik..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="butter">Masło (Butter)</SelectItem>
-                    <SelectItem value="salmon">Łosoś (Salmon)</SelectItem>
-                    <SelectItem value="beef">Wołowina (Beef)</SelectItem>
-                    <SelectItem value="potatoes">Ziemniaki (Potatoes)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Label className="text-sm font-medium mb-2 block">Zmiana ceny (%)</Label>
-                <div className="flex gap-2">
-                  <Input
-                    type="number"
-                    value={ingredientPriceChange}
-                    onChange={(e) => setIngredientPriceChange(parseFloat(e.target.value) || 0)}
-                    placeholder="np. +20"
-                    className="text-lg"
-                  />
-                  <Button onClick={() => setSimulationMode(!simulationMode)}>
-                    {simulationMode ? 'Wyczyść' : 'Symuluj'}
-                  </Button>
-                </div>
+      <TabsContent value="simulation" className="space-y-4 mt-0">
+        <div className="bg-white border border-[#E5E7EB] rounded-lg p-5">
+          <p className="text-[13px] font-semibold text-[#111827] mb-1">Co będzie jeśli zmieni się cena składnika</p>
+          <p className="text-[12px] text-[#6B7280] mb-4">Symuluj wpływ zmiany ceny na wszystkie dania zawierające ten składnik</p>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label className="text-[11px] font-semibold uppercase tracking-widest text-[#9CA3AF] mb-2 block">Składnik</Label>
+              <Select>
+                <SelectTrigger className="h-8 text-[13px]">
+                  <SelectValue placeholder="Wybierz składnik..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="butter">Masło</SelectItem>
+                  <SelectItem value="salmon">Łosoś</SelectItem>
+                  <SelectItem value="beef">Wołowina</SelectItem>
+                  <SelectItem value="potatoes">Ziemniaki</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-[11px] font-semibold uppercase tracking-widest text-[#9CA3AF] mb-2 block">Zmiana ceny (%)</Label>
+              <div className="flex gap-2">
+                <Input type="number" value={ingredientPriceChange} onChange={(e) => setIngredientPriceChange(parseFloat(e.target.value) || 0)} placeholder="+20" className="h-8 text-[13px]" />
+                <button onClick={() => setSimulationMode(!simulationMode)} className="h-8 px-3 rounded-lg bg-[#111827] text-white text-[12px] font-medium hover:bg-[#1F2937]">
+                  {simulationMode ? 'Wyczyść' : 'Symuluj'}
+                </button>
               </div>
             </div>
+          </div>
 
-            {simulationMode && ingredientPriceChange !== 0 && (
-              <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
-                <div className="flex gap-3">
-                  <AlertTriangle className="text-yellow-700 flex-shrink-0 mt-0.5" size={18} />
-                  <div className="text-sm text-yellow-800">
-                    <p className="font-semibold mb-2">
-                      Symulacja zmiany ceny {ingredientPriceChange > 0 ? '+' : ''}{ingredientPriceChange}%:
-                    </p>
-                    <ul className="list-disc pl-5 space-y-1">
-                      <li>3 dania będą dotkniete</li>
-                      <li>Średni koszt produkcji wzrośnie o 2.3%</li>
-                      <li>Łosoś Grillowany koszt prod. osiągnie 45% (KRYTYCZNE)</li>
-                      <li>Wpływ na zysk miesięczny: -1,240 zł</li>
-                    </ul>
-                  </div>
-                </div>
+          {simulationMode && ingredientPriceChange !== 0 && (
+            <div className="mt-4 bg-[#FFFBEB] border border-[#F59E0B] rounded-lg p-4 flex gap-3">
+              <AlertTriangle className="text-[#D97706] shrink-0 mt-0.5 w-4 h-4" />
+              <div className="text-[12px] text-[#92400E]">
+                <p className="font-semibold mb-1">Symulacja zmiany {ingredientPriceChange > 0 ? '+' : ''}{ingredientPriceChange}%:</p>
+                <ul className="list-disc pl-4 space-y-0.5">
+                  <li>3 dania będą dotknięte</li>
+                  <li>Średni koszt produkcji wzrośnie o 2.3%</li>
+                  <li>Łosoś Grillowany osiągnie 45% koszt prod. (KRYTYCZNE)</li>
+                  <li>Wpływ na zysk miesięczny: -1 240 zł</li>
+                </ul>
               </div>
-            )}
-
-            <div className="bg-gray-50 p-4 rounded-lg">
-              <p className="text-sm text-gray-600 mb-3">Wpływ na dania:</p>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b">
-                    <th className="text-left p-2 font-semibold">Danie</th>
-                    <th className="text-right p-2 font-semibold">Obecny koszt</th>
-                    <th className="text-right p-2 font-semibold">Nowy koszt</th>
-                    <th className="text-right p-2 font-semibold">Zmiana % prod.</th>
-                    <th className="text-center p-2 font-semibold">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr className="border-b">
-                    <td className="p-2">Łosoś Grillowany</td>
-                    <td className="text-right p-2">28.10 zł</td>
-                    <td className="text-right p-2 font-semibold">33.72 zł</td>
-                    <td className="text-right p-2">41.3% → 49.6%</td>
-                    <td className="text-center p-2">
-                      <span className="px-2 py-1 rounded-full text-xs bg-red-100 text-red-700 font-semibold">
-                        ⚠️ KRYTYCZNE
-                      </span>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
             </div>
-          </CardContent>
-        </Card>
+          )}
+        </div>
+
+        <div className="bg-white border border-[#E5E7EB] rounded-lg overflow-hidden">
+          <div className="px-5 py-3 border-b border-[#E5E7EB]"><p className="text-[13px] font-semibold text-[#111827]">Wpływ na dania</p></div>
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="text-[10px] font-semibold uppercase tracking-widest text-[#9CA3AF] border-b border-[#E5E7EB] bg-[#F9FAFB]">
+                <th className="py-2.5 px-4 text-left">Danie</th>
+                <th className="pr-3 text-right">Obecny koszt</th>
+                <th className="pr-3 text-right">Nowy koszt</th>
+                <th className="pr-3 text-right">Zmiana % prod.</th>
+                <th className="pr-4 text-center">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="border-b border-[#F3F4F6]">
+                <td className="py-2.5 px-4 font-semibold text-[#111827]">Łosoś Grillowany</td>
+                <td className="pr-3 text-right text-[#374151]">28.10 zł</td>
+                <td className="pr-3 text-right font-semibold text-[#111827]">33.72 zł</td>
+                <td className="pr-3 text-right text-[#374151]">41.3% → 49.6%</td>
+                <td className="pr-4 py-2 text-center">
+                  <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-[#FEF2F2] text-[#DC2626]">
+                    Krytyczny
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </TabsContent>
     </Tabs>
   )

@@ -4,53 +4,82 @@
 
 @layer base {
   :root {
-    /* Base: Clean White & Dark Text */
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    /* ── SaaS Design System ── */
+    --background:   220 14% 96%;   /* #F7F8FA */
+    --foreground:   220 36%  8%;   /* #111827 */
 
-    /* Cards: White with subtle border */
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
- 
-    /* Popovers */
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
- 
-    /* BRAND COLOR: Professional Navy Blue */
-    /* If you want Orange, change to: 24.6 95% 53.1% */
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
- 
-    /* Secondary: Light Gray-Blue */
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
- 
-    /* Muted: Gray text */
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
- 
-    /* Accent: Hover states */
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
- 
-    /* Destructive: Red */
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    --card:           0  0% 100%;  /* #FFFFFF */
+    --card-foreground: 220 36% 8%;
 
-    /* Borders */
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
- 
+    --popover:        0  0% 100%;
+    --popover-foreground: 220 36% 8%;
+
+    --primary:      217 91% 60%;   /* #2563EB */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary:    220 14% 96%;   /* #F7F8FA */
+    --secondary-foreground: 220 36% 8%;
+
+    --muted:        220 13% 95%;
+    --muted-foreground: 220  9% 46%; /* #6B7280 */
+
+    --accent:       217 91% 97%;   /* very light blue */
+    --accent-foreground: 217 91% 40%;
+
+    --destructive:    0 72% 51%;   /* #DC2626 */
+    --destructive-foreground: 0 0% 100%;
+
+    --border:       220 13% 91%;   /* #E5E7EB */
+    --input:        220 13% 91%;
+    --ring:         217 91% 60%;
+
     --radius: 0.5rem;
+
+    /* Semantic tokens */
+    --success:      142 71% 45%;   /* #16A34A */
+    --warning:       38 92% 50%;   /* #F59E0B */
+    --error:          0 72% 51%;   /* #DC2626 */
   }
 }
- 
+
 @layer base {
   * {
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-[#F7F8FA] text-[#111827];
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
+
+  /* Clean scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #9CA3AF; }
+}
+
+@layer utilities {
+  /* Typography scale */
+  .text-display    { @apply text-4xl font-bold tracking-tight text-[#111827]; }
+  .text-heading    { @apply text-2xl font-semibold tracking-tight text-[#111827]; }
+  .text-subheading { @apply text-base font-semibold text-[#111827]; }
+  .text-label      { @apply text-xs font-medium uppercase tracking-widest text-[#6B7280]; }
+  .text-value      { @apply text-3xl font-bold tabular-nums text-[#111827]; }
+  .text-body       { @apply text-sm text-[#374151]; }
+  .text-caption    { @apply text-xs text-[#6B7280]; }
+
+  /* Card variants */
+  .card-surface {
+    @apply bg-white rounded-lg border border-[#E5E7EB] shadow-[0_1px_3px_rgba(0,0,0,0.04)];
+  }
+  .card-surface-sm {
+    @apply bg-white rounded-md border border-[#E5E7EB] shadow-[0_1px_2px_rgba(0,0,0,0.04)];
+  }
+
+  /* Status pill */
+  .status-green  { @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-[#DCFCE7] text-[#16A34A]; }
+  .status-yellow { @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-[#FEF9C3] text-[#CA8A04]; }
+  .status-red    { @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-[#FEE2E2] text-[#DC2626]; }
+  .status-blue   { @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-[#DBEAFE] text-[#2563EB]; }
+  .status-gray   { @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-[#F3F4F6] text-[#6B7280]; }
 }
