@@ -31,6 +31,7 @@ interface DeliveryItem {
   ingredient_id: string
   quantity_ordered: number
   quantity_received: number
+  expiry_date?: string | null
 }
 
 interface WarehousePanelProps {
@@ -94,6 +95,7 @@ export function CentralWarehousePanel({
 
       const { data: ingData } = await supabase.from('ingredients').select('*').order('name')
       if (ingData) setIngredients(ingData)
+      const { data: prodData } = await supabase.from('inventory_products').select('*').order('name')
 
       if (companyId) {
         const { data: locData } = await supabase
@@ -103,13 +105,14 @@ export function CentralWarehousePanel({
           .order('name')
         if (locData) setLocations(locData)
       } else {
-        setLocations([])
+        const { data: locData } = await supabase.from('locations').select('*').order('name')
+        if (locData) setLocations(locData)
       }
 
       const stockMap = new Map<string, StockItem>()
       if (ingData) {
         ingData.forEach((ing: any) => {
-          stockMap.set(ing.id, {
+          stockMap.set(`ing_${ing.id}`, {
             id: ing.id,
             ingredient: ing.name,
             category: ing.category || 'Inne',
@@ -122,6 +125,21 @@ export function CentralWarehousePanel({
           })
         })
       }
+      if (prodData) {
+        prodData.forEach((prod: any) => {
+          stockMap.set(`prod_${prod.id}`, {
+            id: prod.id,
+            ingredient: prod.name,
+            category: prod.category || 'Produkty',
+            onHand: 0,
+            reserved: 0,
+            available: 0,
+            minThreshold: 0,
+            unit: prod.unit || 'szt',
+            value: 0,
+          })
+        })
+      }
 
       const { data: txData } = await supabase
         .from('inventory_transactions')
@@ -129,18 +147,24 @@ export function CentralWarehousePanel({
         .order('created_at', { ascending: false })
 
       if (txData) {
-        const qtySums = new Map<string, number>()
+        const ingQtySums = new Map<string, number>()
+        const prodQtySums = new Map<string, number>()
         txData.forEach((tx: any) => {
-          const current = qtySums.get(tx.ingredient_id) || 0
           const change = tx.tx_type === 'invoice_in' ? tx.quantity : -tx.quantity
-          qtySums.set(tx.ingredient_id, current + change)
-        })
-        qtySums.forEach((qty, ingId) => {
-          const item = stockMap.get(ingId)
-          if (item) {
-            item.onHand = qty
-            item.available = qty - item.reserved
+          if (tx.ingredient_id) {
+            ingQtySums.set(tx.ingredient_id, (ingQtySums.get(tx.ingredient_id) || 0) + change)
           }
+          if (tx.product_id) {
+            prodQtySums.set(tx.product_id, (prodQtySums.get(tx.product_id) || 0) + change)
+          }
+        })
+        ingQtySums.forEach((qty, ingId) => {
+          const item = stockMap.get(`ing_${ingId}`)
+          if (item) { item.onHand = qty; item.available = qty - item.reserved }
+        })
+        prodQtySums.forEach((qty, prodId) => {
+          const item = stockMap.get(`prod_${prodId}`)
+          if (item) { item.onHand = qty; item.available = qty - item.reserved }
         })
       }
 
@@ -161,7 +185,7 @@ export function CentralWarehousePanel({
   }
 
   const handleAddDeliveryItem = () => {
-    setDeliveryItems([...deliveryItems, { ingredient_id: '', quantity_ordered: 0, quantity_received: 0 }])
+    setDeliveryItems([...deliveryItems, { ingredient_id: '', quantity_ordered: 0, quantity_received: 0, expiry_date: null }])
   }
 
   const handleRemoveDeliveryItem = (index: number) => {
@@ -218,6 +242,7 @@ export function CentralWarehousePanel({
             quantity_received: item.quantity_received || 0,
             unit: ingredient.unit || 'kg',
             unit_price: ingredient.last_price || 0,
+            expiry_date: item.expiry_date || null,
           })
           if (itemError) throw itemError
 
@@ -466,10 +491,11 @@ export function CentralWarehousePanel({
                 <div>
                   <Label className="text-[11px] font-semibold uppercase tracking-widest text-[#9CA3AF] mb-1.5 block">Pozycje</Label>
                   <div className="bg-[#F9FAFB] border border-[#E5E7EB] rounded-lg p-3 max-h-96 overflow-y-auto mb-2">
-                    <div className="grid grid-cols-4 gap-2 mb-2 pb-2 border-b border-[#E5E7EB]">
+                    <div className="grid grid-cols-5 gap-2 mb-2 pb-2 border-b border-[#E5E7EB]">
                       <div className="text-[10px] font-semibold uppercase tracking-widest text-[#9CA3AF]">Składnik</div>
                       <div className="text-[10px] font-semibold uppercase tracking-widest text-[#9CA3AF]">Zamówione</div>
                       <div className="text-[10px] font-semibold uppercase tracking-widest text-[#9CA3AF]">Odebrane</div>
+                      <div className="text-[10px] font-semibold uppercase tracking-widest text-[#9CA3AF]">Data ważności</div>
                       <div className="text-[10px] font-semibold uppercase tracking-widest text-[#9CA3AF]">Akcja</div>
                     </div>
                     {deliveryItems.length === 0 ? (
@@ -477,7 +503,7 @@ export function CentralWarehousePanel({
                     ) : (
                       <div className="space-y-2">
                         {deliveryItems.map((item, idx) => (
-                          <div key={idx} className="grid grid-cols-4 gap-2">
+                          <div key={idx} className="grid grid-cols-5 gap-2">
                             <Select value={item.ingredient_id} onValueChange={(v) => updateDeliveryItem(idx, 'ingredient_id', v)}>
                               <SelectTrigger className="h-8 text-[12px]">
                                 <SelectValue placeholder="Wybierz..." />
@@ -490,6 +516,7 @@ export function CentralWarehousePanel({
                             </Select>
                             <Input type="number" placeholder="0" className="h-8 text-[12px]" value={item.quantity_ordered} onChange={(e) => updateDeliveryItem(idx, 'quantity_ordered', Number(e.target.value))} />
                             <Input type="number" placeholder="0" className="h-8 text-[12px]" value={item.quantity_received} onChange={(e) => updateDeliveryItem(idx, 'quantity_received', Number(e.target.value))} />
+                            <Input type="date" className="h-8 text-[12px]" value={item.expiry_date || ''} onChange={(e) => updateDeliveryItem(idx, 'expiry_date', e.target.value || null)} />
                             <button onClick={() => handleRemoveDeliveryItem(idx)} className="h-8 px-2 text-[11px] text-[#DC2626] hover:bg-[#FEF2F2] rounded-md">Usuń</button>
                           </div>
                         ))}

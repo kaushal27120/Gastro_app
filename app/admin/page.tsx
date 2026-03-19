@@ -24,6 +24,8 @@ import { CentralWarehousePanel } from '@/components/central-warehouse-panel'
 import { DishesManager } from '@/components/dishes-manager'
 import { DashboardCharts } from '@/components/dashboard-charts'
 import { EmployeesManager } from '@/components/employees-manager'
+import { ScheduleGrid } from '@/components/schedule-grid'
+import type { ScheduleEmployee } from '@/components/schedule-grid'
 import type { WeekDay } from '@/components/dashboard-charts'
 
 
@@ -429,6 +431,7 @@ type ActiveView =
   | 'menu_pricing' | 'menu_calculator' | 'warehouse_deviations'
   | 'central_warehouse'
   | 'admin_users' | 'employees'
+  | 'schedule'
 
 /* ================================================================== */
 /*  HELPERS                                                            */
@@ -563,6 +566,9 @@ export default function AdminDashboard() {
   const [pendingSemisEntries, setPendingSemisEntries] = useState<SemisReconEntry[]>([])
   const [semisLoading, setSemisLoading] = useState(false)
   const [semisVerificationNote, setSemisVerificationNote] = useState('')
+
+  // ── Schedule ──
+  const [scheduleEmployees, setScheduleEmployees] = useState<ScheduleEmployee[]>([])
 
   // ── Month Close ──
   const [closedMonths, setClosedMonths] = useState<ClosedMonth[]>([])
@@ -1469,6 +1475,22 @@ export default function AdminDashboard() {
     if (data) setClosedMonths(data.map((c: any) => ({ ...c, location_name: c.locations?.name || '?' })))
   }
   useEffect(() => { fetchClosedMonths() }, [locations])
+
+  useEffect(() => {
+    if (activeView !== 'schedule' || filterLocationId === 'all') { setScheduleEmployees([]); return }
+    const fetch = async () => {
+      const { data } = await supabase.from('employees')
+        .select('id, full_name, real_hour_cost, base_rate, user_id, position, phone, status')
+        .eq('location_id', filterLocationId)
+        .neq('status', 'inactive')
+      setScheduleEmployees((data || []).map((e: any) => ({
+        id: e.id, full_name: e.full_name,
+        real_hour_cost: e.real_hour_cost ?? null, base_rate: e.base_rate ?? null,
+        user_id: e.user_id ?? null, position: e.position ?? null, phone: e.phone ?? null,
+      })))
+    }
+    fetch()
+  }, [activeView, filterLocationId, supabase])
 
   const handleCloseMonth = async () => {
     if (!closeLocationId || !closeMonth) { alert('Wybierz lokalizację i miesiąc'); return }
@@ -3030,6 +3052,30 @@ export default function AdminDashboard() {
           <div>
             <h1 className="text-[22px] font-bold text-[#111827] tracking-tight mb-6">Magazyn centralny</h1>
             <CentralWarehousePanel companyId={companyId} />
+          </div>
+        )}
+
+        {/* ═══════════════════════════════════════════════════════ */}
+        {/*  SCHEDULE (HARMONOGRAM)                                */}
+        {/* ═══════════════════════════════════════════════════════ */}
+        {activeView === 'schedule' && (
+          <div>
+            <h1 className="text-[22px] font-bold text-[#111827] tracking-tight mb-4">Harmonogram pracy</h1>
+            {filterLocationId === 'all' ? (
+              <div className="flex items-center justify-center h-48 bg-white rounded-xl border border-dashed border-slate-300">
+                <div className="text-center text-slate-500">
+                  <Calendar className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+                  <p className="font-medium">Wybierz lokalizację</p>
+                  <p className="text-sm mt-1">Wybierz konkretną lokalizację z listy powyżej, aby zobaczyć grafik.</p>
+                </div>
+              </div>
+            ) : (
+              <ScheduleGrid
+                locationId={filterLocationId}
+                employees={scheduleEmployees}
+                supabase={supabase}
+              />
+            )}
           </div>
         )}
       </main>

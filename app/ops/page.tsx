@@ -6,9 +6,11 @@ import { useRouter } from 'next/navigation'
 import { OpsSidebar } from '@/components/OpsSidebar'
 import { ScheduleGrid } from '@/components/schedule-grid'
 import { EmployeesManager } from '@/components/employees-manager'
+import { WeeklySalesImport } from '@/components/weekly-sales-import'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import IngredientAutocomplete from '@/components/ingredient-autocomplete'
+import ProductAutocomplete from '@/components/product-autocomplete'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -28,12 +30,17 @@ type LocationData = {
   locations: { name: string; id: string; company_id: string }
 }
 type Employee = { id: string; full_name: string; real_hour_cost: number | null; base_rate?: number | null; user_id?: string | null; phone?: string | null; position?: string | null; email?: string | null; status?: string }
-type EmployeeRow = { employee_id: string; hours: string }
+type EmployeeRow = { employee_id: string; hours: string; rate: string }
 type ValidationError = { field: string; message: string }
 type InvoiceLineItem = {
   product: string; cosCategory: string; quantity: string
   unit: string; netPrice: string; vatRate: string
   ingredient_id?: string | null
+  product_id?: string | null
+  source?: 'ingredient' | 'product'
+}
+type SemisLineItem = {
+  description: string; category: string; totalNet: string; vatRate: string
 }
 type InventoryJob = {
   id: string; location_id: string; type: 'MONTHLY' | 'WEEKLY'
@@ -58,6 +65,36 @@ type SemisReconciliationEntry = {
   amount: string
   description: string
   status: 'pending' | 'submitted'
+}
+
+type DailyReportHistoryItem = {
+  id: string
+  date: string
+  gross_revenue: number | null
+  net_revenue: number | null
+  transaction_count: number | null
+  total_labor_hours: number | null
+  status: string | null
+  closing_person: string | null
+}
+
+type InvoiceHistoryItem = {
+  id: string
+  invoice_type: 'COS' | 'SEMIS'
+  supplier_name: string
+  invoice_number: string
+  service_date: string
+  total_gross: number
+  status: string
+  created_at: string
+}
+
+type InventoryProduct = {
+  id: string; name: string; unit: string; category: string
+  is_food: boolean; active: boolean; last_price: number
+}
+type ExcelProductRow = {
+  name: string; unit: string; category: string; last_price: string; is_food: boolean
 }
 
 type ActiveView = 'reporting' | 'invoices' | 'inventory' | 'scheduling' | 'employees'
@@ -130,8 +167,10 @@ const PRODUCT_CATEGORIES = [
 ]
 
 const emptyLineItem: InvoiceLineItem = {
-  product: '', cosCategory: '', quantity: '', unit: 'kg', netPrice: '', vatRate: '0.08'
+  product: '', cosCategory: '', quantity: '', unit: 'kg', netPrice: '', vatRate: '0.08',
+  ingredient_id: null, product_id: null, source: 'ingredient'
 }
+const emptySemisLine: SemisLineItem = { description: '', category: '', totalNet: '', vatRate: '0.23' }
 
 const emptySemisReconEntry: SemisReconciliationEntry = {
   location_id: '',
@@ -189,6 +228,8 @@ export default function OpsDashboard() {
   const [reportDate, setReportDate] = useState('')
   const [isReadOnly, setIsReadOnly] = useState(false)
   const [scheduleWeekStart, setScheduleWeekStart] = useState('')
+  const [reportingSubView, setReportingSubView] = useState<'form' | 'history'>('form')
+  const [dailyReportHistory, setDailyReportHistory] = useState<DailyReportHistoryItem[]>([])
 
   // ── Closing person ──
   const [closingPersonName, setClosingPersonName] = useState('')
@@ -196,13 +237,13 @@ export default function OpsDashboard() {
 
   // ── Employees (reporting) ──
   const [employees, setEmployees] = useState<Employee[]>([])
-  const [employeeRows, setEmployeeRows] = useState<EmployeeRow[]>([{ employee_id: '', hours: '' }])
+  const [employeeRows, setEmployeeRows] = useState<EmployeeRow[]>([{ employee_id: '', hours: '', rate: '' }])
   const [shiftMatrix, setShiftMatrix] = useState<Record<string, ShiftCell>>({})
   const [newWorker, setNewWorker] = useState({ full_name: '', real_hour_cost: '', user_email: '' })
 
   // ── Sales form ──
   const [salesForm, setSalesForm] = useState({
-    transactions: '', gross: '', netRevenue: '', card: '', cash: '',
+    transactions: '', gross: '', netRevenue: '', card: '', cash: '', online: '',
     comments: '', targetGross: '', targetTx: '', totalHoursAgg: '',
     avgRateAgg: '', cashReported: '', cashPhysical: '',
     pettyExpense: '', losses: '', refunds: '',
@@ -219,14 +260,13 @@ export default function OpsDashboard() {
     supplier: '', invoiceNumber: '', saleDate: '', receiptDate: '',
   })
   const [cosLineItems, setCosLineItems] = useState<InvoiceLineItem[]>([{ ...emptyLineItem }])
-  const [semisForm, setSemisForm] = useState({
-    totalNet: '', vatRate: '0.23', category: '', description: '',
-  })
+  const [semisLineItems, setSemisLineItems] = useState<SemisLineItem[]>([{ ...emptySemisLine }])
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [invoiceErrors, setInvoiceErrors] = useState<ValidationError[]>([])
   const [excelLoading, setExcelLoading] = useState(false)
-  const [invoiceSubView, setInvoiceSubView] = useState<'form' | 'semis_recon'>('form')
+  const [invoiceSubView, setInvoiceSubView] = useState<'form' | 'semis_recon' | 'history'>('form')
+  const [invoiceHistory, setInvoiceHistory] = useState<InvoiceHistoryItem[]>([])
 
   // ── SEMIS Reconciliation Entry ──
   const [semisReconEntries, setSemisReconEntries] = useState<SemisReconciliationEntry[]>([])
@@ -234,7 +274,16 @@ export default function OpsDashboard() {
   const [semisReconSaving, setSemisReconSaving] = useState(false)
 
   // ── Inventory state ──
-  const [inventorySubView, setInventorySubView] = useState<'active' | 'fill' | 'history'>('active')
+  const [inventorySubView, setInventorySubView] = useState<'active' | 'fill' | 'history' | 'products'>('active')
+  const [inventoryProducts, setInventoryProducts] = useState<InventoryProduct[]>([])
+  const [invProductSearch, setInvProductSearch] = useState('')
+  const [invProductCategoryFilter, setInvProductCategoryFilter] = useState('')
+  const [newInvProduct, setNewInvProduct] = useState({ name: '', unit: 'kg', category: 'inne', is_food: true, last_price: '' })
+  const [editingInvProduct, setEditingInvProduct] = useState<InventoryProduct | null>(null)
+  const [invProductSaving, setInvProductSaving] = useState(false)
+  const [excelProductRows, setExcelProductRows] = useState<ExcelProductRow[]>([])
+  const [excelProductLoading, setExcelProductLoading] = useState(false)
+  const [excelProductSaving, setExcelProductSaving] = useState(false)
   const [inventoryJobs, setInventoryJobs] = useState<InventoryJob[]>([])
   const [inventoryHistory, setInventoryHistory] = useState<InventoryJob[]>([])
   const [selectedJob, setSelectedJob] = useState<InventoryJob | null>(null)
@@ -301,7 +350,8 @@ export default function OpsDashboard() {
           ...p,
           transactions: data.transaction_count ?? '', gross: data.gross_revenue ?? '',
           netRevenue: data.net_revenue ?? '', card: data.card_payments ?? '',
-          cash: data.cash_payments ?? '', comments: data.comments ?? '',
+          cash: data.cash_payments ?? '', online: data.online_payments ?? '',
+          comments: data.comments ?? '',
           targetGross: data.target_gross_sales ?? '', targetTx: data.target_transactions ?? '',
           totalHoursAgg: data.total_labor_hours ?? '', avgRateAgg: data.avg_hourly_rate ?? '',
           cashReported: data.cash_reported ?? '', cashPhysical: data.cash_physical ?? '',
@@ -317,7 +367,7 @@ export default function OpsDashboard() {
         setExistingReportId(data.id)
       } else {
         setSalesForm(p => ({
-          ...p, transactions: '', gross: '', netRevenue: '', card: '', cash: '',
+          ...p, transactions: '', gross: '', netRevenue: '', card: '', cash: '', online: '',
           comments: '', targetGross: '', targetTx: '', totalHoursAgg: '',
           avgRateAgg: '', cashReported: '', cashPhysical: '', pettyExpense: '',
           losses: '', refunds: '', incidentType: '', incidentDetails: '',
@@ -342,11 +392,11 @@ export default function OpsDashboard() {
       }
 
       const { data: hrs } = await supabase.from('employee_daily_hours')
-        .select('employee_id, hours')
+        .select('employee_id, hours, hour_cost')
         .eq('location_id', selectedLocation.location_id).eq('date', reportDate)
       if (hrs && hrs.length > 0) {
-        setEmployeeRows(hrs.map((r: any) => ({ employee_id: r.employee_id, hours: String(r.hours) })))
-      } else setEmployeeRows([{ employee_id: '', hours: '' }])
+        setEmployeeRows(hrs.map((r: any) => ({ employee_id: r.employee_id, hours: String(r.hours), rate: r.hour_cost ? String(r.hour_cost) : '' })))
+      } else setEmployeeRows([{ employee_id: '', hours: '', rate: '' }])
     }
     fetch()
   }, [selectedLocation, reportDate, activeView, supabase])
@@ -430,6 +480,55 @@ export default function OpsDashboard() {
   }, [selectedLocation, scheduleWeekStart, activeView, supabase])
 
   // ═══════════════════════════════════════════════════════════════════
+  // LOAD: Daily report history
+  // ═══════════════════════════════════════════════════════════════════
+  useEffect(() => {
+    if (!selectedLocation || activeView !== 'reporting' || reportingSubView !== 'history') return
+    const fetchHistory = async () => {
+      const { data } = await supabase.from('sales_daily')
+        .select('id, date, gross_revenue, net_revenue, transaction_count, total_labor_hours, status, closing_person')
+        .eq('location_id', selectedLocation.location_id)
+        .order('date', { ascending: false })
+        .limit(30)
+      if (data) setDailyReportHistory(data as DailyReportHistoryItem[])
+    }
+    fetchHistory()
+  }, [selectedLocation, activeView, reportingSubView, supabase])
+
+  // ═══════════════════════════════════════════════════════════════════
+  // LOAD: Invoice history
+  // ═══════════════════════════════════════════════════════════════════
+  useEffect(() => {
+    if (!selectedLocation || activeView !== 'invoices' || invoiceSubView !== 'history') return
+    const fetchInvHistory = async () => {
+      const { data } = await supabase.from('invoices')
+        .select('id, invoice_type, supplier_name, invoice_number, service_date, total_gross, status, created_at')
+        .eq('location_id', selectedLocation.location_id)
+        .order('created_at', { ascending: false })
+        .limit(50)
+      if (data) setInvoiceHistory(data as InvoiceHistoryItem[])
+    }
+    fetchInvHistory()
+  }, [selectedLocation, activeView, invoiceSubView, supabase])
+
+  // ═══════════════════════════════════════════════════════════════════
+  // LOAD: Inventory products
+  // ═══════════════════════════════════════════════════════════════════
+  const fetchInvProducts = async () => {
+    if (!selectedLocation) return
+    const locCompanyId = selectedLocation.locations?.company_id
+    let q = supabase.from('inventory_products').select('*').order('category').order('name')
+    if (locCompanyId) q = q.eq('company_id', locCompanyId)
+    const { data } = await q
+    if (data) setInventoryProducts(data as InventoryProduct[])
+  }
+  useEffect(() => {
+    if (!selectedLocation || activeView !== 'inventory' || inventorySubView !== 'products') return
+    fetchInvProducts()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLocation, activeView, inventorySubView, supabase])
+
+  // ═══════════════════════════════════════════════════════════════════
   // LOAD: SEMIS Reconciliation entries
   // ═══════════════════════════════════════════════════════════════════
   useEffect(() => {
@@ -469,14 +568,17 @@ export default function OpsDashboard() {
   const planNet = planGross > 0 ? planGross / (1 + VAT_RATE) : 0
   const planRealisation = planNet > 0 ? net / planNet : 0
   const aov = tx > 0 ? net / tx : 0
+  const online = Number(salesForm.online) || 0
   const cardPercent = gross > 0 ? card / gross : 0
   const cashPercent = gross > 0 ? cash / gross : 0
+  const onlinePercent = gross > 0 ? online / gross : 0
 
   const employeeTotals = employeeRows.reduce((acc, row) => {
     const h = Number(row.hours) || 0
     if (!row.employee_id || h <= 0) return acc
     const emp = employees.find(e => e.id === row.employee_id)
-    acc.totalHours += h; acc.totalCost += h * (emp?.real_hour_cost || 0)
+    const rate = Number(row.rate) || emp?.real_hour_cost || emp?.base_rate || 0
+    acc.totalHours += h; acc.totalCost += h * rate
     return acc
   }, { totalHours: 0, totalCost: 0 })
 
@@ -501,8 +603,11 @@ export default function OpsDashboard() {
   const cosTotalNet = cosLineItems.reduce((s, i) => s + getLineNet(i), 0)
   const cosTotalGross = cosLineItems.reduce((s, i) => s + getLineGross(i), 0)
   const cosTotalVat = cosTotalGross - cosTotalNet
-  const semisTotalNet = Number(semisForm.totalNet) || 0
-  const semisTotalGross = semisTotalNet * (1 + (Number(semisForm.vatRate) || 0))
+  const semisTotalNet = semisLineItems.reduce((s, item) => s + (Number(item.totalNet) || 0), 0)
+  const semisTotalGross = semisLineItems.reduce((s, item) => {
+    const net = Number(item.totalNet) || 0
+    return s + net * (1 + (Number(item.vatRate) || 0))
+  }, 0)
 
   // Inventory filtered items
   const filteredJobItems = useMemo(() => {
@@ -523,8 +628,8 @@ export default function OpsDashboard() {
   const validateReport = (): ValidationError[] => {
     const e: ValidationError[] = []
     if (!gross && !netManual) e.push({ field: 'gross', message: 'Utarg brutto lub netto jest wymagany.' })
-    if (gross > 0 && Math.abs(card + cash - gross) > 0.5)
-      e.push({ field: 'card_cash', message: `Karty + Gotówka ≠ Brutto. Różnica: ${fmt2(Math.abs(card + cash - gross))}` })
+    if (gross > 0 && Math.abs(card + cash + online - gross) > 0.5)
+      e.push({ field: 'card_cash', message: `Karty + Gotówka + Online ≠ Brutto. Różnica: ${fmt2(Math.abs(card + cash + online - gross))}` })
     if (net > 0 && tx <= 0) e.push({ field: 'transactions', message: 'Utarg > 0, ale brak transakcji.' })
     if (net > 0 && totalHours <= 0) e.push({ field: 'hours', message: 'Utarg > 0, ale brak godzin pracy.' })
     if (Math.abs(cashDiff) > 0.01 && !salesForm.cashDiffExplanation.trim())
@@ -554,8 +659,8 @@ export default function OpsDashboard() {
       })
     }
     if (invoiceType === 'SEMIS') {
-      if (!semisTotalNet) e.push({ field: 'semisAmount', message: 'Kwota netto wymagana.' })
-      if (!semisForm.category) e.push({ field: 'semisCategory', message: 'Kategoria wymagana.' })
+      const validSemis = semisLineItems.filter(item => item.category && Number(item.totalNet) > 0)
+      if (validSemis.length === 0) e.push({ field: 'semisAmount', message: 'Dodaj min. jedną pozycję z kwotą i kategorią.' })
     }
     return e
   }
@@ -576,7 +681,7 @@ export default function OpsDashboard() {
       location_id: selectedLocation.location_id,
       company_id: selectedLocation.locations.company_id,
       date: reportDate, transaction_count: tx, gross_revenue: gross,
-      net_revenue: net, card_payments: card, cash_payments: cash,
+      net_revenue: net, card_payments: card, cash_payments: cash, online_payments: online,
       comments: salesForm.comments, target_gross_sales: planGross,
       target_transactions: planTx, total_labor_hours: totalHours,
       avg_hourly_rate: totalHours > 0 ? laborCost / totalHours : 0,
@@ -605,7 +710,7 @@ export default function OpsDashboard() {
       const rows = validRows.map(r => {
         const h = Number(r.hours) || 0
         const emp = employees.find(e => e.id === r.employee_id)
-        const rate = emp?.real_hour_cost || 0
+        const rate = Number(r.rate) || emp?.real_hour_cost || emp?.base_rate || 0
         return { date: reportDate, location_id: selectedLocation.location_id,
           employee_id: r.employee_id, hours: h, hour_cost: rate, daily_cost: h * rate }
       })
@@ -713,20 +818,26 @@ export default function OpsDashboard() {
     }
 
     if (invoiceType === 'SEMIS') {
-      const { data: inv, error: e } = await supabase.from('invoices').insert({
-        location_id: selectedLocation.location_id,
-        company_id: selectedLocation.locations.company_id,
-        invoice_type: 'SEMIS', supplier_name: invoiceCommon.supplier,
-        invoice_number: invoiceCommon.invoiceNumber,
-        service_date: invoiceCommon.saleDate, receipt_date: invoiceCommon.receiptDate,
-        total_net: semisTotalNet, total_vat: semisTotalGross - semisTotalNet,
-        total_gross: semisTotalGross, semis_category: semisForm.category,
-        description: semisForm.description, payment_method: 'przelew',
-        attachment_url: attachmentUrl, status: 'submitted',
-      }).select('id').single()
+      const validItems = semisLineItems.filter(item => item.category && Number(item.totalNet) > 0)
+      const rows = validItems.map((item, idx) => {
+        const net = Number(item.totalNet) || 0
+        const gross = net * (1 + (Number(item.vatRate) || 0))
+        return {
+          location_id: selectedLocation.location_id,
+          company_id: selectedLocation.locations.company_id,
+          invoice_type: 'SEMIS' as const, supplier_name: invoiceCommon.supplier,
+          invoice_number: invoiceCommon.invoiceNumber,
+          service_date: invoiceCommon.saleDate, receipt_date: invoiceCommon.receiptDate,
+          total_net: net, total_vat: gross - net,
+          total_gross: gross, semis_category: item.category,
+          description: item.description, payment_method: 'przelew',
+          attachment_url: idx === 0 ? attachmentUrl : null, status: 'submitted',
+        }
+      })
+      const { data: invRows, error: e } = await supabase.from('invoices').insert(rows).select('id')
       if (e) { alert('Błąd: ' + e.message); setUploading(false); return }
-      invoiceId = inv?.id
-      alert('✅ Faktura SEMIS zapisana')
+      invoiceId = invRows?.[0]?.id
+      alert(`✅ Faktura SEMIS zapisana (${rows.length} pozycji)`)
     }
 
     // Create notification for admin
@@ -746,7 +857,7 @@ export default function OpsDashboard() {
     setInvoiceType('')
     setInvoiceCommon({ supplier: '', invoiceNumber: '', saleDate: new Date().toISOString().split('T')[0], receiptDate: new Date().toISOString().split('T')[0] })
     setCosLineItems([{ ...emptyLineItem }])
-    setSemisForm({ totalNet: '', vatRate: '0.23', category: '', description: '' })
+    setSemisLineItems([{ ...emptySemisLine }])
     setInvoiceFile(null); setInvoiceErrors([]); setUploading(false)
   }
 
@@ -993,10 +1104,15 @@ export default function OpsDashboard() {
   }
 
   // ── Row helpers ──
-  const addEmployeeRow = () => setEmployeeRows(p => [...p, { employee_id: '', hours: '' }])
+  const addEmployeeRow = () => setEmployeeRows(p => [...p, { employee_id: '', hours: '', rate: '' }])
   const removeEmployeeRow = (i: number) => setEmployeeRows(p => p.length > 1 ? p.filter((_, idx) => idx !== i) : p)
-  const updateEmployeeRow = (i: number, f: 'employee_id' | 'hours', v: string) =>
+  const updateEmployeeRow = (i: number, f: 'employee_id' | 'hours' | 'rate', v: string) =>
     setEmployeeRows(p => { const c = [...p]; c[i] = { ...c[i], [f]: v }; return c })
+  const selectEmployee = (i: number, empId: string) => {
+    const emp = employees.find(e => e.id === empId)
+    const autoRate = emp ? String(emp.real_hour_cost ?? emp.base_rate ?? '') : ''
+    setEmployeeRows(p => { const c = [...p]; c[i] = { ...c[i], employee_id: empId, rate: c[i].rate || autoRate }; return c })
+  }
   const updateShiftCell = (userId: string, date: string, field: keyof ShiftCell, value: string) => {
     setShiftMatrix(prev => {
       const key = `${userId}__${date}`
@@ -1009,6 +1125,10 @@ export default function OpsDashboard() {
   const removeCosLine = (i: number) => setCosLineItems(p => p.length > 1 ? p.filter((_, idx) => idx !== i) : p)
   const updateCosLine = (i: number, f: keyof InvoiceLineItem, v: string) =>
     setCosLineItems(p => { const c = [...p]; c[i] = { ...c[i], [f]: v }; return c })
+  const addSemisLine = () => setSemisLineItems(p => [...p, { ...emptySemisLine }])
+  const removeSemisLine = (i: number) => setSemisLineItems(p => p.length > 1 ? p.filter((_, idx) => idx !== i) : p)
+  const updateSemisLine = (i: number, f: keyof SemisLineItem, v: string) =>
+    setSemisLineItems(p => { const c = [...p]; c[i] = { ...c[i], [f]: v }; return c })
 
   // ═══════════════════════════════════════════════════════════════════
   // RENDER
@@ -1113,8 +1233,56 @@ export default function OpsDashboard() {
         {/* ╚══════════════════════════════════════════════════════════╝ */}
         {activeView === 'reporting' && (
           <div className="max-w-4xl">
-            <header className="mb-8"><h1 className="text-3xl font-bold text-gray-900">Raport dzienny</h1></header>
+            <header className="mb-6">
+              <h1 className="text-3xl font-bold text-gray-900">Raport dzienny</h1>
+              <div className="flex gap-2 mt-4">
+                <Button variant={reportingSubView === 'form' ? 'default' : 'outline'} onClick={() => setReportingSubView('form')}>
+                  <FileText className="w-4 h-4 mr-2" />Formularz</Button>
+                <Button variant={reportingSubView === 'history' ? 'default' : 'outline'} onClick={() => setReportingSubView('history')}>
+                  <Clock className="w-4 h-4 mr-2" />Historia</Button>
+              </div>
+            </header>
 
+            {reportingSubView === 'history' && (
+              <Card>
+                <CardHeader><CardTitle>Historia raportów dziennych</CardTitle></CardHeader>
+                <CardContent>
+                  {dailyReportHistory.length === 0 ? (
+                    <p className="text-slate-400 text-center py-8">Brak raportów</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead><tr className="border-b text-left text-xs text-slate-500 uppercase">
+                          <th className="py-2 pr-3">Data</th>
+                          <th className="pr-3 text-right">Brutto</th>
+                          <th className="pr-3 text-right">Netto</th>
+                          <th className="pr-3 text-right">Tx</th>
+                          <th className="pr-3 text-right">Godz.</th>
+                          <th className="pr-3">Status</th>
+                          <th className="pr-3">Zamykający</th>
+                        </tr></thead>
+                        <tbody>
+                          {dailyReportHistory.map(r => (
+                            <tr key={r.id} className="border-b hover:bg-gray-50">
+                              <td className="py-2 pr-3 font-medium">{r.date}</td>
+                              <td className="pr-3 text-right">{r.gross_revenue != null ? fmt2(r.gross_revenue) : '—'}</td>
+                              <td className="pr-3 text-right">{r.net_revenue != null ? fmt2(r.net_revenue) : '—'}</td>
+                              <td className="pr-3 text-right">{r.transaction_count ?? '—'}</td>
+                              <td className="pr-3 text-right">{r.total_labor_hours != null ? r.total_labor_hours.toFixed(1) : '—'}</td>
+                              <td className="pr-3"><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_LABELS[r.status || 'draft']?.color || 'bg-gray-100'}`}>{STATUS_LABELS[r.status || 'draft']?.label || r.status}</span></td>
+                              <td className="pr-3 text-slate-500 text-xs">{r.closing_person || '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {reportingSubView === 'form' && (
+            <>
             {validationErrors.length > 0 && (
               <div className="mb-6 bg-red-50 border-2 border-red-300 rounded-lg p-5">
                 <div className="flex items-center gap-2 mb-3"><ShieldAlert className="w-6 h-6 text-red-600" />
@@ -1160,11 +1328,15 @@ export default function OpsDashboard() {
                   <div className="relative"><span className="absolute left-3 top-3 text-gray-400">zł</span>
                     <Input type="number" placeholder="0,00" value={salesForm.cash} onChange={e => setSalesForm({...salesForm, cash: e.target.value})}
                       disabled={isReadOnly} className={`bg-gray-50 h-12 text-lg pl-8 ${fieldErr('card_cash') ? 'border-red-400' : ''}`} /></div></div>
+                <div className="space-y-2"><Label>Online</Label>
+                  <div className="relative"><span className="absolute left-3 top-3 text-gray-400">zł</span>
+                    <Input type="number" placeholder="0,00" value={salesForm.online} onChange={e => setSalesForm({...salesForm, online: e.target.value})}
+                      disabled={isReadOnly} className="bg-gray-50 h-12 text-lg pl-8" /></div></div>
               </div>
 
-              {gross > 0 && Math.abs(card + cash - gross) > 0.5 && (
+              {gross > 0 && Math.abs(card + cash + online - gross) > 0.5 && (
                 <div className="mb-4 bg-yellow-50 border border-yellow-300 text-yellow-800 p-3 rounded flex items-center gap-2 text-sm">
-                  <AlertTriangle className="w-4 h-4" />Karty + Gotówka = {fmt2(card + cash)} ≠ Brutto {fmt2(gross)}</div>
+                  <AlertTriangle className="w-4 h-4" />Karty + Gotówka + Online = {fmt2(card + cash + online)} ≠ Brutto {fmt2(gross)}</div>
               )}
 
               <Card className="mb-8"><CardHeader className="pb-2"><CardTitle className="text-sm font-semibold text-slate-600">Podsumowanie sprzedaży</CardTitle></CardHeader>
@@ -1175,7 +1347,8 @@ export default function OpsDashboard() {
                     <p className="text-xs text-slate-500">Tx: {tx}</p></div>
                   <div><p className="text-xs text-slate-500 uppercase">Płatności</p>
                     <p className="text-xs text-slate-500">Karty: {gross > 0 ? fmtPct(cardPercent) : '—'}</p>
-                    <p className="text-xs text-slate-500">Gotówka: {gross > 0 ? fmtPct(cashPercent) : '—'}</p></div>
+                    <p className="text-xs text-slate-500">Gotówka: {gross > 0 ? fmtPct(cashPercent) : '—'}</p>
+                    <p className="text-xs text-slate-500">Online: {gross > 0 && online > 0 ? fmtPct(onlinePercent) : '—'}</p></div>
                 </CardContent></Card>
 
               {/* S2: Plan */}
@@ -1207,18 +1380,19 @@ export default function OpsDashboard() {
               <Card className={`mb-6 ${fieldErr('hours') ? 'border-red-300' : ''}`}>
                 <CardContent className="space-y-3 pt-4">
                   <div className="grid grid-cols-12 gap-2 text-xs font-semibold text-slate-500 border-b pb-2">
-                    <div className="col-span-5">Pracownik</div><div className="col-span-2 text-right">Godziny</div>
-                    <div className="col-span-2 text-right">Stawka</div><div className="col-span-2 text-right">Koszt</div><div className="col-span-1" /></div>
+                    <div className="col-span-4">Pracownik</div><div className="col-span-2 text-right">Godziny</div>
+                    <div className="col-span-2 text-right">Stawka/h</div><div className="col-span-3 text-right">Koszt</div><div className="col-span-1" /></div>
                   {employeeRows.map((row, i) => {
                     const emp = employees.find(e => e.id === row.employee_id)
-                    const h = Number(row.hours) || 0; const rate = emp?.real_hour_cost || 0
+                    const h = Number(row.hours) || 0
+                    const rate = Number(row.rate) || emp?.real_hour_cost || emp?.base_rate || 0
                     return (<div key={i} className="grid grid-cols-12 gap-2 items-center text-sm">
-                      <div className="col-span-5"><select value={row.employee_id} onChange={e => updateEmployeeRow(i, 'employee_id', e.target.value)}
+                      <div className="col-span-4"><select value={row.employee_id} onChange={e => selectEmployee(i, e.target.value)}
                         disabled={isReadOnly} className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm">
                         <option value="">– wybierz –</option>{employees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}</select></div>
                       <div className="col-span-2"><Input type="number" value={row.hours} onChange={e => updateEmployeeRow(i, 'hours', e.target.value)} disabled={isReadOnly} className="h-9 text-right" /></div>
-                      <div className="col-span-2 text-right text-slate-500">{rate ? fmt2(rate) : '—'}</div>
-                      <div className="col-span-2 text-right font-medium">{h * rate > 0 ? fmt2(h * rate) : '—'}</div>
+                      <div className="col-span-2"><Input type="number" value={row.rate} onChange={e => updateEmployeeRow(i, 'rate', e.target.value)} disabled={isReadOnly} placeholder={emp ? String(emp.real_hour_cost ?? emp.base_rate ?? '—') : '—'} className="h-9 text-right" /></div>
+                      <div className="col-span-3 text-right font-medium">{h * rate > 0 ? fmt2(h * rate) : '—'}</div>
                       <div className="col-span-1 flex justify-end">{!isReadOnly && <Button variant="ghost" size="icon" onClick={() => removeEmployeeRow(i)} className="h-8 w-8 text-slate-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></Button>}</div>
                     </div>)})}
                   {!isReadOnly && <Button variant="outline" size="sm" onClick={addEmployeeRow} className="mt-2"><Plus className="w-4 h-4 mr-1" />Dodaj</Button>}
@@ -1292,6 +1466,8 @@ export default function OpsDashboard() {
                 </div>
               )}
             </div>
+            </>
+            )}
           </div>
         )}
 
@@ -1307,6 +1483,8 @@ export default function OpsDashboard() {
                   <FileText className="w-4 h-4 mr-2" />Nowa faktura</Button>
                 <Button variant={invoiceSubView === 'semis_recon' ? 'default' : 'outline'} onClick={() => setInvoiceSubView('semis_recon')}>
                   <RefreshCw className="w-4 h-4 mr-2" />Uzgodnienie SEMIS</Button>
+                <Button variant={invoiceSubView === 'history' ? 'default' : 'outline'} onClick={() => setInvoiceSubView('history')}>
+                  <Clock className="w-4 h-4 mr-2" />Historia</Button>
               </div>
             </header>
 
@@ -1364,21 +1542,37 @@ export default function OpsDashboard() {
                         <CardHeader><CardTitle>Krok 3 — Pozycje (COS)</CardTitle></CardHeader>
                         <CardContent className="space-y-4">
                           <div className="grid grid-cols-12 gap-2 text-xs font-semibold text-slate-500 border-b pb-2">
-                            <div className="col-span-2">Produkt</div><div className="col-span-2">Kategoria</div>
+                            <div className="col-span-1">Typ</div><div className="col-span-2">Produkt</div><div className="col-span-2">Kategoria</div>
                             <div className="col-span-1 text-right">Ilość</div><div className="col-span-1">Jedn.</div>
-                            <div className="col-span-1 text-right">Cena</div><div className="col-span-2 text-right">Netto</div>
+                            <div className="col-span-1 text-right">Cena</div><div className="col-span-1 text-right">Netto</div>
                             <div className="col-span-1">VAT</div><div className="col-span-1 text-right">Brutto</div><div className="col-span-1" /></div>
                           {cosLineItems.map((item, i) => (
                             <div key={i} className="grid grid-cols-12 gap-2 items-center text-sm">
+                              <div className="col-span-1">
+                                <select value={item.source || 'ingredient'} onChange={e => setCosLineItems(p => { const c = [...p]; c[i] = { ...c[i], source: e.target.value as 'ingredient' | 'product', product: '', ingredient_id: null, product_id: null }; return c })}
+                                  className="h-9 w-full rounded-md border border-input bg-background px-1 text-xs">
+                                  <option value="ingredient">Skł.</option>
+                                  <option value="product">Prod.</option>
+                                </select>
+                              </div>
                               <div className="col-span-2">
-                                <IngredientAutocomplete
-                                  value={item.product}
-                                  onChange={(v) => updateCosLine(i, 'product', v)}
-                                  onSelect={(ing) => {
-                                    // set both product name and ingredient_id
-                                    setCosLineItems(p => { const c = [...p]; c[i] = { ...c[i], product: ing.name, ingredient_id: ing.id }; return c })
-                                  }}
-                                />
+                                {(item.source || 'ingredient') === 'ingredient' ? (
+                                  <IngredientAutocomplete
+                                    value={item.product}
+                                    onChange={(v) => updateCosLine(i, 'product', v)}
+                                    onSelect={(ing) => {
+                                      setCosLineItems(p => { const c = [...p]; c[i] = { ...c[i], product: ing.name, ingredient_id: ing.id, product_id: null }; return c })
+                                    }}
+                                  />
+                                ) : (
+                                  <ProductAutocomplete
+                                    value={item.product}
+                                    onChange={(v) => updateCosLine(i, 'product', v)}
+                                    onSelect={(prod) => {
+                                      setCosLineItems(p => { const c = [...p]; c[i] = { ...c[i], product: prod.name, product_id: prod.id, ingredient_id: null, unit: prod.unit || c[i].unit, netPrice: prod.last_price ? String(prod.last_price) : c[i].netPrice }; return c })
+                                    }}
+                                  />
+                                )}
                               </div>
                               <div className="col-span-2"><select value={item.cosCategory} onChange={e => updateCosLine(i, 'cosCategory', e.target.value)}
                                 className={`h-9 w-full rounded-md border ${item.product && !item.cosCategory ? 'border-red-300' : 'border-input'} bg-background px-1 text-xs`}>
@@ -1387,7 +1581,7 @@ export default function OpsDashboard() {
                               <div className="col-span-1"><select value={item.unit} onChange={e => updateCosLine(i, 'unit', e.target.value)} className="h-9 w-full rounded-md border border-input bg-background px-1 text-xs">
                                 {UNITS.map(u => <option key={u.value} value={u.value}>{u.label}</option>)}</select></div>
                               <div className="col-span-1"><Input type="number" value={item.netPrice} onChange={e => updateCosLine(i, 'netPrice', e.target.value)} className="h-9 text-right" /></div>
-                              <div className="col-span-2 text-right text-slate-700 font-medium">{getLineNet(item) > 0 ? fmt2(getLineNet(item)) : '—'}</div>
+                              <div className="col-span-1 text-right text-slate-700 font-medium">{getLineNet(item) > 0 ? fmt2(getLineNet(item)) : '—'}</div>
                               <div className="col-span-1"><select value={item.vatRate} onChange={e => updateCosLine(i, 'vatRate', e.target.value)} className="h-9 w-full rounded-md border border-input bg-background px-1 text-xs">
                                 {VAT_RATES.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}</select></div>
                               <div className="col-span-1 text-right font-medium">{getLineGross(item) > 0 ? fmt2(getLineGross(item)) : '—'}</div>
@@ -1404,23 +1598,44 @@ export default function OpsDashboard() {
 
                     {/* SEMIS Form */}
                     {invoiceType === 'SEMIS' && (
-                      <Card className="mb-6"><CardHeader><CardTitle>Krok 3 — Koszt (SEMIS)</CardTitle></CardHeader>
-                        <CardContent className="space-y-6">
-                          <div className="grid grid-cols-2 gap-6">
-                            <div className="space-y-2"><Label>Kwota netto *{invErr('semisAmount') && <span className="text-red-500 text-xs ml-1">⚠</span>}</Label>
-                              <div className="relative"><span className="absolute left-3 top-3 text-gray-400">zł</span>
-                                <Input type="number" placeholder="0,00" value={semisForm.totalNet} onChange={e => setSemisForm({...semisForm, totalNet: e.target.value})} className={`pl-8 h-12 text-lg ${invErr('semisAmount') ? 'border-red-400' : ''}`} /></div></div>
-                            <div className="space-y-2"><Label>VAT</Label>
-                              <select value={semisForm.vatRate} onChange={e => setSemisForm({...semisForm, vatRate: e.target.value})} className="h-12 w-full rounded-md border border-input bg-background px-3">
-                                {VAT_RATES.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}</select></div>
+                      <Card className={`mb-6 ${invErr('semisAmount') ? 'border-red-400' : ''}`}>
+                        <CardHeader><CardTitle>Krok 3 — Koszty (SEMIS)</CardTitle></CardHeader>
+                        <CardContent className="space-y-4">
+                          <div className="grid grid-cols-12 gap-2 text-xs font-semibold text-slate-500 border-b pb-2">
+                            <div className="col-span-4">Opis</div>
+                            <div className="col-span-3">Kategoria</div>
+                            <div className="col-span-2 text-right">Kwota netto</div>
+                            <div className="col-span-2">VAT</div>
+                            <div className="col-span-1" />
                           </div>
-                          <div className="space-y-2"><Label>Kategoria *{invErr('semisCategory') && <span className="text-red-500 text-xs ml-1">⚠</span>}</Label>
-                            <select value={semisForm.category} onChange={e => setSemisForm({...semisForm, category: e.target.value})}
-                              className={`h-10 w-full rounded-md border ${invErr('semisCategory') ? 'border-red-400' : 'border-input'} bg-background px-3 text-sm`}>
-                              <option value="">– wybierz –</option>{SEMIS_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></div>
-                          <textarea value={semisForm.description} onChange={e => setSemisForm({...semisForm, description: e.target.value})}
-                            placeholder="Opis…" className="w-full min-h-[60px] rounded-md border border-input bg-gray-50 px-3 py-2 text-sm" />
-                          <div className="grid grid-cols-3 gap-4">
+                          {semisLineItems.map((item, i) => (
+                            <div key={i} className="grid grid-cols-12 gap-2 items-center">
+                              <div className="col-span-4">
+                                <Input placeholder="Opis pozycji…" value={item.description} onChange={e => updateSemisLine(i, 'description', e.target.value)} className="h-9 text-sm" />
+                              </div>
+                              <div className="col-span-3">
+                                <select value={item.category} onChange={e => updateSemisLine(i, 'category', e.target.value)}
+                                  className={`h-9 w-full rounded-md border ${item.description && !item.category ? 'border-red-300' : 'border-input'} bg-background px-1 text-xs`}>
+                                  <option value="">– wybierz –</option>
+                                  {SEMIS_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                                </select>
+                              </div>
+                              <div className="col-span-2">
+                                <div className="relative"><span className="absolute left-2 top-2 text-gray-400 text-xs">zł</span>
+                                  <Input type="number" placeholder="0,00" value={item.totalNet} onChange={e => updateSemisLine(i, 'totalNet', e.target.value)} className="pl-6 h-9 text-right text-sm" /></div>
+                              </div>
+                              <div className="col-span-2">
+                                <select value={item.vatRate} onChange={e => updateSemisLine(i, 'vatRate', e.target.value)} className="h-9 w-full rounded-md border border-input bg-background px-1 text-xs">
+                                  {VAT_RATES.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}
+                                </select>
+                              </div>
+                              <div className="col-span-1 flex justify-end">
+                                <Button variant="ghost" size="icon" onClick={() => removeSemisLine(i)} className="h-8 w-8 text-slate-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></Button>
+                              </div>
+                            </div>
+                          ))}
+                          <Button variant="outline" size="sm" onClick={addSemisLine}><Plus className="w-4 h-4 mr-1" />Dodaj pozycję</Button>
+                          <div className="grid grid-cols-3 gap-4 border-t-2 pt-4">
                             <div className="bg-slate-50 rounded p-3"><p className="text-xs text-slate-500 uppercase">Netto</p><p className="text-xl font-bold">{fmt2(semisTotalNet)}</p></div>
                             <div className="bg-slate-50 rounded p-3"><p className="text-xs text-slate-500 uppercase">VAT</p><p className="text-xl font-bold">{fmt2(semisTotalGross - semisTotalNet)}</p></div>
                             <div className="bg-emerald-50 rounded p-3 border border-emerald-200"><p className="text-xs text-emerald-600 uppercase font-semibold">Brutto</p><p className="text-xl font-bold text-emerald-800">{fmt2(semisTotalGross)}</p></div>
@@ -1597,6 +1812,47 @@ export default function OpsDashboard() {
                 </Card>
               </div>
             )}
+
+            {/* ── Invoice History ── */}
+            {invoiceSubView === 'history' && (
+              <Card>
+                <CardHeader><CardTitle>Historia wysłanych faktur</CardTitle></CardHeader>
+                <CardContent>
+                  {invoiceHistory.length === 0 ? (
+                    <p className="text-slate-400 text-center py-8">Brak faktur</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead><tr className="border-b text-left text-xs text-slate-500 uppercase">
+                          <th className="py-2 pr-3">Typ</th>
+                          <th className="pr-3">Nr faktury</th>
+                          <th className="pr-3">Dostawca</th>
+                          <th className="pr-3">Data sprzedaży</th>
+                          <th className="pr-3 text-right">Brutto</th>
+                          <th className="pr-3">Status</th>
+                        </tr></thead>
+                        <tbody>
+                          {invoiceHistory.map(inv => (
+                            <tr key={inv.id} className="border-b hover:bg-gray-50">
+                              <td className="py-2 pr-3">
+                                <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${inv.invoice_type === 'COS' ? 'bg-blue-50 text-blue-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                                  {inv.invoice_type === 'COS' ? 'COS (magazyn)' : 'SEMIS (koszt)'}
+                                </span>
+                              </td>
+                              <td className="pr-3 font-medium">{inv.invoice_number}</td>
+                              <td className="pr-3">{inv.supplier_name}</td>
+                              <td className="pr-3 text-slate-500">{inv.service_date}</td>
+                              <td className="pr-3 text-right font-medium">{fmt2(Number(inv.total_gross) || 0)}</td>
+                              <td className="pr-3"><span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_LABELS[inv.status]?.color || 'bg-gray-100'}`}>{STATUS_LABELS[inv.status]?.label || inv.status}</span></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
           </div>
         )}
 
@@ -1613,6 +1869,8 @@ export default function OpsDashboard() {
                 <div className="flex gap-2 mt-4">
                   <Button variant={inventorySubView === 'active' ? 'default' : 'outline'} onClick={() => setInventorySubView('active')}>Aktywne</Button>
                   <Button variant={inventorySubView === 'history' ? 'default' : 'outline'} onClick={() => setInventorySubView('history')}>Historia</Button>
+                  <Button variant={inventorySubView === 'products' ? 'default' : 'outline'} onClick={() => setInventorySubView('products')}>
+                    <Package className="w-4 h-4 mr-2" />Produkty</Button>
                 </div>
               )}
             </header>
@@ -1774,6 +2032,267 @@ export default function OpsDashboard() {
                   </div>
                 )}
               </div>
+            )}
+
+            {/* ── Products ── */}
+            {inventorySubView === 'products' && (
+              <div className="space-y-4">
+
+                {/* ── Add product form ── */}
+                <Card>
+                  <CardHeader><CardTitle className="text-base">Dodaj produkt do systemu</CardTitle></CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid grid-cols-4 gap-3">
+                      <div className="col-span-2 space-y-1">
+                        <Label className="text-xs text-slate-500">Nazwa produktu</Label>
+                        <Input placeholder="np. Mleko 3,2% 1L" value={newInvProduct.name} onChange={e => setNewInvProduct({...newInvProduct, name: e.target.value})} />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-slate-500">Jednostka</Label>
+                        <select value={newInvProduct.unit} onChange={e => setNewInvProduct({...newInvProduct, unit: e.target.value})}
+                          className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
+                          {UNITS.map(u => <option key={u.value} value={u.value}>{u.label}</option>)}
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-slate-500">Kategoria</Label>
+                        <select value={newInvProduct.category} onChange={e => setNewInvProduct({...newInvProduct, category: e.target.value})}
+                          className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
+                          {PRODUCT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-6">
+                        <div className="space-y-1">
+                          <Label className="text-xs text-slate-500">Cena netto (opcjonalnie)</Label>
+                          <Input type="number" placeholder="0,00" value={newInvProduct.last_price} onChange={e => setNewInvProduct({...newInvProduct, last_price: e.target.value})} className="w-36" />
+                        </div>
+                        <label className="flex items-center gap-2 cursor-pointer mt-4">
+                          <input type="checkbox" checked={newInvProduct.is_food} onChange={e => setNewInvProduct({...newInvProduct, is_food: e.target.checked})} className="w-4 h-4 accent-blue-600" />
+                          <span className="text-sm text-slate-700">Produkt spożywczy</span>
+                        </label>
+                      </div>
+                      <Button disabled={invProductSaving} onClick={async () => {
+                        if (!newInvProduct.name.trim()) { alert('Podaj nazwę'); return }
+                        setInvProductSaving(true)
+                        const cid = selectedLocation?.locations?.company_id
+                        const { error } = await supabase.from('inventory_products').insert({ name: newInvProduct.name.trim(), unit: newInvProduct.unit, category: newInvProduct.category, is_food: newInvProduct.is_food, last_price: Number(newInvProduct.last_price) || 0, active: true, company_id: cid || null })
+                        setInvProductSaving(false)
+                        if (error) { alert('Błąd: ' + error.message); return }
+                        setNewInvProduct({ name: '', unit: 'kg', category: 'inne', is_food: true, last_price: '' })
+                        fetchInvProducts()
+                      }} className="h-10 px-6">
+                        {invProductSaving ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
+                        Zapisz produkt
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* ── Products list ── */}
+                <Card>
+                  <CardContent className="pt-5">
+                    {/* toolbar */}
+                    <div className="flex flex-wrap gap-3 mb-4 items-center">
+                      <div className="relative flex-1 min-w-[200px]">
+                        <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                        <Input placeholder="Szukaj produktu…" value={invProductSearch} onChange={e => setInvProductSearch(e.target.value)} className="pl-9" />
+                      </div>
+                      <select value={invProductCategoryFilter} onChange={e => setInvProductCategoryFilter(e.target.value)}
+                        className="h-10 rounded-md border border-input bg-background px-3 text-sm min-w-[160px]">
+                        <option value="">Wszystkie kategorie</option>
+                        {PRODUCT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                      <div className="flex flex-col items-end gap-0.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-500 font-medium">Import z Excela</span>
+                          <label className="cursor-pointer">
+                            <input type="file" accept=".xlsx,.xls" className="hidden" disabled={excelProductLoading}
+                              onChange={async (e) => {
+                                const file = e.target.files?.[0]
+                                if (!file) return
+                                setExcelProductLoading(true)
+                                const reader = new FileReader()
+                                reader.onload = (evt) => {
+                                  try {
+                                    const wb = XLSX.read(evt.target?.result as string, { type: 'binary' })
+                                    const ws = wb.Sheets[wb.SheetNames[0]]
+                                    const data = XLSX.utils.sheet_to_json(ws, { defval: '' }) as Array<Record<string, any>>
+                                    const rows: ExcelProductRow[] = data.map(row => ({
+                                      name: String(row['name'] ?? row['Produkt'] ?? row['Nazwa'] ?? '').trim(),
+                                      unit: String(row['Jednostka'] ?? row['unit'] ?? 'kg').trim(),
+                                      category: String(row['Kategoria'] ?? row['category'] ?? 'inne').trim(),
+                                      last_price: String(row['Cena netto'] ?? row['last_price'] ?? row['Cena'] ?? ''),
+                                      is_food: true,
+                                    })).filter(r => r.name)
+                                    setExcelProductRows(rows)
+                                  } catch { alert('Błąd odczytu pliku') }
+                                  setExcelProductLoading(false)
+                                }
+                                reader.readAsBinaryString(file)
+                                e.target.value = ''
+                              }}
+                            />
+                            <span className="h-10 px-4 inline-flex items-center gap-1.5 rounded-md border border-input bg-white text-sm font-medium cursor-pointer hover:bg-slate-50">
+                              <FileSpreadsheet className="w-4 h-4 text-green-600" />
+                              {excelProductLoading ? 'Wczytywanie…' : 'Wybierz plik'}
+                            </span>
+                          </label>
+                        </div>
+                        <p className="text-[11px] text-slate-400">Kolumny: name / Produkt, Jednostka, Kategoria, Cena netto</p>
+                      </div>
+                    </div>
+
+                    {/* Excel preview */}
+                    {excelProductRows.length > 0 && (
+                      <div className="mb-6 border border-blue-200 rounded-lg overflow-hidden">
+                        <div className="bg-blue-50 px-4 py-2.5 flex items-center justify-between">
+                          <div>
+                            <p className="text-sm font-semibold text-blue-800">Podgląd importu — {excelProductRows.length} produktów</p>
+                            <p className="text-xs text-blue-600">Sprawdź i popraw dane, a następnie kliknij „Zapisz wszystkie"</p>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button size="sm" variant="outline" onClick={() => setExcelProductRows([])}>Anuluj</Button>
+                            <Button size="sm" disabled={excelProductSaving} onClick={async () => {
+                              const validRows = excelProductRows.filter(r => r.name.trim())
+                              if (!validRows.length) return
+                              setExcelProductSaving(true)
+                              const cid = selectedLocation?.locations?.company_id
+                              const payload = validRows.map(r => ({ name: r.name.trim(), unit: r.unit || 'kg', category: r.category || 'inne', is_food: r.is_food, last_price: Number(r.last_price) || 0, active: true, company_id: cid || null }))
+                              const { error } = await supabase.from('inventory_products').insert(payload)
+                              setExcelProductSaving(false)
+                              if (error) { alert('Błąd zapisu: ' + error.message); return }
+                              setExcelProductRows([])
+                              fetchInvProducts()
+                              alert(`✅ Zaimportowano ${validRows.length} produktów`)
+                            }} className="bg-blue-600 hover:bg-blue-700 text-white">
+                              {excelProductSaving ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Save className="w-4 h-4 mr-1" />}
+                              Zapisz wszystkie ({excelProductRows.length})
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="overflow-x-auto max-h-72">
+                          <table className="w-full text-sm">
+                            <thead className="bg-blue-50 border-b border-blue-200 sticky top-0">
+                              <tr className="text-xs text-blue-700 uppercase">
+                                <th className="px-3 py-2 text-left">Nazwa</th>
+                                <th className="px-3 py-2 text-left">Jednostka</th>
+                                <th className="px-3 py-2 text-left">Kategoria</th>
+                                <th className="px-3 py-2 text-right">Cena netto</th>
+                                <th className="px-3 py-2 text-center">Spożywczy</th>
+                                <th className="px-2 py-2 w-8"></th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 bg-white">
+                              {excelProductRows.map((row, idx) => (
+                                <tr key={idx} className="hover:bg-blue-50/30">
+                                  <td className="px-2 py-1"><Input value={row.name} onChange={e => setExcelProductRows(p => { const c = [...p]; c[idx] = {...c[idx], name: e.target.value}; return c })} className="h-8 text-sm" /></td>
+                                  <td className="px-2 py-1"><select value={row.unit} onChange={e => setExcelProductRows(p => { const c = [...p]; c[idx] = {...c[idx], unit: e.target.value}; return c })} className="h-8 rounded border border-input bg-background px-1 text-xs w-full">{UNITS.map(u => <option key={u.value} value={u.value}>{u.label}</option>)}</select></td>
+                                  <td className="px-2 py-1"><select value={row.category} onChange={e => setExcelProductRows(p => { const c = [...p]; c[idx] = {...c[idx], category: e.target.value}; return c })} className="h-8 rounded border border-input bg-background px-1 text-xs w-full">{PRODUCT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></td>
+                                  <td className="px-2 py-1"><Input type="number" value={row.last_price} onChange={e => setExcelProductRows(p => { const c = [...p]; c[idx] = {...c[idx], last_price: e.target.value}; return c })} className="h-8 text-sm text-right w-24" /></td>
+                                  <td className="px-2 py-1 text-center"><input type="checkbox" checked={row.is_food} onChange={e => setExcelProductRows(p => { const c = [...p]; c[idx] = {...c[idx], is_food: e.target.checked}; return c })} className="w-4 h-4 accent-blue-600" /></td>
+                                  <td className="px-2 py-1"><button onClick={() => setExcelProductRows(p => p.filter((_, i) => i !== idx))} className="text-slate-300 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" /></button></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Products table */}
+                    {inventoryProducts.length === 0 && excelProductRows.length === 0 ? (
+                      <p className="text-slate-400 text-center py-10">Brak produktów — dodaj ręcznie lub zaimportuj z Excela</p>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                              <th className="py-2.5 pr-3">Nazwa</th>
+                              <th className="pr-3">Kategoria</th>
+                              <th className="pr-3">Jedn.</th>
+                              <th className="pr-3 text-right">Cena netto</th>
+                              <th className="pr-3">Status</th>
+                              <th className="pr-3 text-right">Akcje</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {inventoryProducts
+                              .filter(p =>
+                                (!invProductSearch || p.name.toLowerCase().includes(invProductSearch.toLowerCase())) &&
+                                (!invProductCategoryFilter || p.category === invProductCategoryFilter)
+                              )
+                              .map(p => (
+                              <tr key={p.id} className={`hover:bg-slate-50 ${!p.active ? 'opacity-50' : ''}`}>
+                                {editingInvProduct?.id === p.id ? (
+                                  <>
+                                    <td className="py-1.5 pr-3"><Input value={editingInvProduct.name} onChange={e => setEditingInvProduct({...editingInvProduct, name: e.target.value})} className="h-8 text-sm" /></td>
+                                    <td className="pr-3"><select value={editingInvProduct.category} onChange={e => setEditingInvProduct({...editingInvProduct, category: e.target.value})} className="h-8 rounded border border-input bg-background px-1 text-xs w-full">{PRODUCT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></td>
+                                    <td className="pr-3"><select value={editingInvProduct.unit} onChange={e => setEditingInvProduct({...editingInvProduct, unit: e.target.value})} className="h-8 rounded border border-input bg-background px-1 text-xs">{UNITS.map(u => <option key={u.value} value={u.value}>{u.label}</option>)}</select></td>
+                                    <td className="pr-3"><Input type="number" value={editingInvProduct.last_price} onChange={e => setEditingInvProduct({...editingInvProduct, last_price: Number(e.target.value)})} className="h-8 text-sm w-24 text-right" /></td>
+                                    <td className="pr-3">
+                                      <label className="flex items-center gap-1 cursor-pointer">
+                                        <input type="checkbox" checked={editingInvProduct.is_food} onChange={e => setEditingInvProduct({...editingInvProduct, is_food: e.target.checked})} className="w-3.5 h-3.5 accent-blue-600" />
+                                        <span className="text-xs text-slate-600">Spożywczy</span>
+                                      </label>
+                                    </td>
+                                    <td className="pr-3">
+                                      <div className="flex gap-1 justify-end">
+                                        <button onClick={async () => {
+                                          await supabase.from('inventory_products').update({ name: editingInvProduct.name, unit: editingInvProduct.unit, category: editingInvProduct.category, is_food: editingInvProduct.is_food, last_price: editingInvProduct.last_price }).eq('id', p.id)
+                                          setEditingInvProduct(null)
+                                          fetchInvProducts()
+                                        }} className="h-7 px-3 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">Zapisz</button>
+                                        <button onClick={() => setEditingInvProduct(null)} className="h-7 px-2 text-xs border border-slate-200 rounded hover:bg-slate-50">Anuluj</button>
+                                      </div>
+                                    </td>
+                                  </>
+                                ) : (
+                                  <>
+                                    <td className="py-2.5 pr-3 font-medium text-slate-800">{p.name}</td>
+                                    <td className="pr-3 text-slate-500 text-xs">{p.category}</td>
+                                    <td className="pr-3 text-slate-500 text-xs">{p.unit}</td>
+                                    <td className="pr-3 text-right font-medium">{p.last_price ? `${fmt2(p.last_price)} zł` : '—'}</td>
+                                    <td className="pr-3">
+                                      <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${p.active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
+                                        {p.active ? 'Aktywny' : 'Nieaktywny'}
+                                      </span>
+                                    </td>
+                                    <td className="pr-3">
+                                      <div className="flex gap-1 justify-end">
+                                        <button onClick={() => setEditingInvProduct(p)} title="Edytuj"
+                                          className="h-8 w-8 flex items-center justify-center rounded border border-slate-200 hover:bg-slate-50 text-slate-500 hover:text-blue-600">
+                                          <FileText className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button onClick={async () => {
+                                          if (!confirm(`Usunąć "${p.name}"?`)) return
+                                          await supabase.from('inventory_products').delete().eq('id', p.id)
+                                          fetchInvProducts()
+                                        }} title="Usuń"
+                                          className="h-8 w-8 flex items-center justify-center rounded border border-slate-200 hover:bg-red-50 text-slate-400 hover:text-red-600">
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </>
+                                )}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
+            {/* ── Weekly Sales Import ── */}
+            {inventorySubView !== 'fill' && inventorySubView !== 'products' && (
+              <WeeklySalesImport
+                locations={myLocations.map(l => ({ id: l.location_id, name: l.locations.name }))}
+              />
             )}
           </div>
         )}

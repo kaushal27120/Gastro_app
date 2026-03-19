@@ -79,6 +79,12 @@ export function Sidebar({
       ],
     },
     {
+      label: 'Harmonogram',
+      items: [
+        { key: 'schedule', label: 'Grafik pracy', icon: Calendar },
+      ],
+    },
+    {
       label: 'Admin',
       items: [
         { key: 'employees',   label: 'Pracownicy',      icon: Users },
@@ -94,7 +100,7 @@ export function Sidebar({
     plan2: [
       'dashboard', 'pnl', 'notifications', 'products', 'daily_reports',
       'approvals', 'inv_approvals', 'semis_verification', 'monthly', 'weekly',
-      'reports', 'history', 'imported', 'admin_users', 'employees',
+      'reports', 'history', 'imported', 'admin_users', 'employees', 'schedule',
     ],
   }
   const isLimitedPlan = plan === 'plan1' || plan === 'plan2'

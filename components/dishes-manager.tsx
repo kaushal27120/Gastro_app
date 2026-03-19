@@ -45,25 +45,36 @@ type Ingredient = {
   category: string
 }
 
+type InventoryProduct = {
+  id: string
+  name: string
+  unit: string
+  last_price?: number | null
+}
+
 type RecipeIngredient = {
   id: string
-  ingredient_id: string
+  ingredient_id: string | null
+  product_id?: string | null
+  source?: 'ingredient' | 'product' | null
   quantity: number
   unit: string
   cost_per_unit?: number | null
   ingredients?: { name: string; base_unit: string; category: string } | { name: string; base_unit: string; category: string }[] | null
+  inventory_products?: { name: string; unit: string } | null
 }
 
 export function DishesManager({ supabase, companyId }: DishesManagerProps) {
   const [recipes, setRecipes] = useState<Recipe[]>([])
   const [ingredients, setIngredients] = useState<Ingredient[]>([])
+  const [products, setProducts] = useState<InventoryProduct[]>([])
   const [locations, setLocations] = useState<Location[]>([])
   const [dishes, setDishes] = useState<Dish[]>([])
   const [selectedRecipeId, setSelectedRecipeId] = useState<string>('')
   const [recipeIngredients, setRecipeIngredients] = useState<RecipeIngredient[]>([])
   const [recipeCost, setRecipeCost] = useState<number>(0)
   const [newRecipe, setNewRecipe] = useState({ name: '', category: '', portions: '1' })
-  const [newItem, setNewItem] = useState({ ingredientId: '', quantity: '1', unit: '' })
+  const [newItem, setNewItem] = useState({ ingredientId: '', productId: '', source: 'ingredient', quantity: '1', unit: '' })
   const [newDish, setNewDish] = useState({
     recipeId: '',
     locationId: '',
@@ -94,6 +105,7 @@ export function DishesManager({ supabase, companyId }: DishesManagerProps) {
   useEffect(() => {
     fetchRecipes()
     fetchIngredients()
+    fetchProducts()
     fetchLocations()
     fetchDishes()
   }, [])
@@ -117,6 +129,11 @@ export function DishesManager({ supabase, companyId }: DishesManagerProps) {
   const fetchIngredients = async () => {
     const { data } = await supabase.from('ingredients').select('id, name, base_unit, category').order('name')
     setIngredients((data as Ingredient[]) || [])
+  }
+
+  const fetchProducts = async () => {
+    const { data } = await supabase.from('inventory_products').select('id, name, unit, last_price').eq('active', true).order('name')
+    setProducts((data as InventoryProduct[]) || [])
   }
 
   const fetchLocations = async () => {
@@ -149,12 +166,12 @@ export function DishesManager({ supabase, companyId }: DishesManagerProps) {
   const fetchRecipeIngredients = async (recipeId: string) => {
     const { data } = await supabase
       .from('recipe_ingredients')
-      .select('id, ingredient_id, quantity, unit, cost_per_unit, ingredients(name, base_unit, category)')
+      .select('id, ingredient_id, product_id, source, quantity, unit, cost_per_unit, ingredients(name, base_unit, category), inventory_products(name, unit)')
       .eq('recipe_id', recipeId)
       .order('id')
 
-    setRecipeIngredients((data as RecipeIngredient[]) || [])
-    await computeRecipeCost(recipeId, (data as RecipeIngredient[]) || [])
+    setRecipeIngredients((data as unknown as RecipeIngredient[]) || [])
+    await computeRecipeCost(recipeId, (data as unknown as RecipeIngredient[]) || [])
   }
 
   const computeRecipeCost = async (recipeId: string, items?: RecipeIngredient[]) => {
@@ -164,23 +181,42 @@ export function DishesManager({ supabase, companyId }: DishesManagerProps) {
       return
     }
 
-    const ingredientIds = ingredientsList.map(i => i.ingredient_id)
-    const { data: prices } = await supabase
-      .from('ingredient_prices_history')
-      .select('ingredient_id, price, recorded_at')
-      .in('ingredient_id', ingredientIds)
-      .order('recorded_at', { ascending: false })
+    const ingredientItems = ingredientsList.filter(i => i.source !== 'product' && i.ingredient_id)
+    const productItems = ingredientsList.filter(i => i.source === 'product' && i.product_id)
 
-    const latestPrice: Record<string, number> = {}
-    ;(prices || []).forEach((p: any) => {
-      if (latestPrice[p.ingredient_id] === undefined) {
-        latestPrice[p.ingredient_id] = Number(p.price || 0)
-      }
-    })
+    const ingredientIds = ingredientItems.map(i => i.ingredient_id as string)
+    const latestIngPrice: Record<string, number> = {}
+    if (ingredientIds.length) {
+      const { data: prices } = await supabase
+        .from('ingredient_prices_history')
+        .select('ingredient_id, price, recorded_at')
+        .in('ingredient_id', ingredientIds)
+        .order('recorded_at', { ascending: false })
+      ;(prices || []).forEach((p: any) => {
+        if (latestIngPrice[p.ingredient_id] === undefined) {
+          latestIngPrice[p.ingredient_id] = Number(p.price || 0)
+        }
+      })
+    }
+
+    const productIds = productItems.map(i => i.product_id as string)
+    const prodPrice: Record<string, number> = {}
+    if (productIds.length) {
+      const { data: prods } = await supabase
+        .from('inventory_products')
+        .select('id, last_price')
+        .in('id', productIds)
+      ;(prods || []).forEach((p: any) => { prodPrice[p.id] = Number(p.last_price || 0) })
+    }
 
     const total = ingredientsList.reduce((sum, item) => {
-      const price = latestPrice[item.ingredient_id] ?? Number(item.cost_per_unit || 0)
-      return sum + (Number(item.quantity || 0) * Number(price || 0))
+      let price = 0
+      if (item.source === 'product' && item.product_id) {
+        price = prodPrice[item.product_id] ?? Number(item.cost_per_unit || 0)
+      } else if (item.ingredient_id) {
+        price = latestIngPrice[item.ingredient_id] ?? Number(item.cost_per_unit || 0)
+      }
+      return sum + (Number(item.quantity || 0) * price)
     }, 0)
 
     setRecipeCost(Number(total.toFixed(2)))
@@ -302,29 +338,38 @@ export function DishesManager({ supabase, companyId }: DishesManagerProps) {
   }
 
   const addRecipeIngredient = async () => {
-    if (!selectedRecipeId || !newItem.ingredientId) {
-      alert('Wybierz składnik i recepturę')
-      return
-    }
+    if (!selectedRecipeId) { alert('Wybierz recepturę'); return }
+    const isProduct = newItem.source === 'product'
+    if (isProduct && !newItem.productId) { alert('Wybierz produkt'); return }
+    if (!isProduct && !newItem.ingredientId) { alert('Wybierz składnik'); return }
     setSavingIngredient(true)
-    const unit = newItem.unit || ingredients.find(i => i.id === newItem.ingredientId)?.base_unit || 'kg'
 
-    const { error } = await supabase.from('recipe_ingredients').insert({
+    const unit = newItem.unit
+      || (isProduct ? products.find(p => p.id === newItem.productId)?.unit : ingredients.find(i => i.id === newItem.ingredientId)?.base_unit)
+      || 'kg'
+
+    const row: any = {
       recipe_id: selectedRecipeId,
-      ingredient_id: newItem.ingredientId,
       quantity: Number(newItem.quantity) || 0,
       unit,
-    })
+      source: newItem.source,
+    }
+    if (isProduct) {
+      row.product_id = newItem.productId
+      row.ingredient_id = null
+    } else {
+      row.ingredient_id = newItem.ingredientId
+      row.product_id = null
+    }
 
+    const { error } = await supabase.from('recipe_ingredients').insert(row)
     if (error) {
       handleError('Błąd dodawania składnika', error)
       setSavingIngredient(false)
       return
     }
-    if (!error) {
-      setNewItem({ ingredientId: '', quantity: '1', unit: '' })
-      fetchRecipeIngredients(selectedRecipeId)
-    }
+    setNewItem({ ingredientId: '', productId: '', source: 'ingredient', quantity: '1', unit: '' })
+    fetchRecipeIngredients(selectedRecipeId)
     setSavingIngredient(false)
   }
 
@@ -655,21 +700,48 @@ export function DishesManager({ supabase, companyId }: DishesManagerProps) {
           {/* Add ingredient form */}
           <div className="px-5 py-4 border-b border-[#E5E7EB] bg-[#F9FAFB]">
             <p className="text-[11px] font-semibold uppercase tracking-widest text-[#9CA3AF] mb-3">
-              Dodaj składnik
+              Dodaj składnik / produkt
             </p>
-            <div className="grid grid-cols-4 gap-2 items-end">
+            <div className="grid grid-cols-5 gap-2 items-end">
               <div>
-                <Label className="text-[11px] text-[#6B7280] mb-1 block">Składnik</Label>
-                <Select value={newItem.ingredientId} onValueChange={(val) => setNewItem({ ...newItem, ingredientId: val })}>
+                <Label className="text-[11px] text-[#6B7280] mb-1 block">Typ</Label>
+                <Select value={newItem.source} onValueChange={(val) => setNewItem({ ...newItem, source: val, ingredientId: '', productId: '' })}>
                   <SelectTrigger className="h-8 text-[13px]">
-                    <SelectValue placeholder="Wybierz…" />
+                    <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {ingredients.map((ing) => (
-                      <SelectItem key={ing.id} value={ing.id}>{ing.name}</SelectItem>
-                    ))}
+                    <SelectItem value="ingredient">Składnik</SelectItem>
+                    <SelectItem value="product">Produkt magazynowy</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+              <div>
+                <Label className="text-[11px] text-[#6B7280] mb-1 block">
+                  {newItem.source === 'product' ? 'Produkt' : 'Składnik'}
+                </Label>
+                {newItem.source === 'product' ? (
+                  <Select value={newItem.productId} onValueChange={(val) => setNewItem({ ...newItem, productId: val })}>
+                    <SelectTrigger className="h-8 text-[13px]">
+                      <SelectValue placeholder="Wybierz…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {products.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Select value={newItem.ingredientId} onValueChange={(val) => setNewItem({ ...newItem, ingredientId: val })}>
+                    <SelectTrigger className="h-8 text-[13px]">
+                      <SelectValue placeholder="Wybierz…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ingredients.map((ing) => (
+                        <SelectItem key={ing.id} value={ing.id}>{ing.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
               <div>
                 <Label className="text-[11px] text-[#6B7280] mb-1 block">Ilość</Label>
@@ -705,10 +777,10 @@ export function DishesManager({ supabase, companyId }: DishesManagerProps) {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-[#E5E7EB]">
-                  {['Składnik', 'Ilość', 'Jednostka', ''].map((h, i) => (
+                  {['Składnik / Produkt', 'Typ', 'Ilość', 'Jednostka', ''].map((h, i) => (
                     <th
                       key={i}
-                      className={`px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-[#6B7280] bg-[#F9FAFB] ${i === 3 ? 'text-right' : 'text-left'}`}
+                      className={`px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-[#6B7280] bg-[#F9FAFB] ${i === 4 ? 'text-right' : 'text-left'}`}
                     >
                       {h}
                     </th>
@@ -718,7 +790,7 @@ export function DishesManager({ supabase, companyId }: DishesManagerProps) {
               <tbody>
                 {recipeIngredients.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="px-4 py-6 text-center text-[13px] text-[#9CA3AF]">
+                    <td colSpan={5} className="px-4 py-6 text-center text-[13px] text-[#9CA3AF]">
                       Brak składników. Dodaj pierwszy składnik powyżej.
                     </td>
                   </tr>
@@ -726,9 +798,16 @@ export function DishesManager({ supabase, companyId }: DishesManagerProps) {
                 {recipeIngredients.map((ri) => (
                   <tr key={ri.id} className="border-b border-[#F3F4F6] hover:bg-[#F9FAFB] transition-colors">
                     <td className="px-4 py-2.5 text-[13px] font-medium text-[#111827]">
-                      {Array.isArray(ri.ingredients)
-                        ? (ri.ingredients[0]?.name || ri.ingredient_id)
-                        : (ri.ingredients?.name || ri.ingredient_id)}
+                      {ri.source === 'product'
+                        ? (ri.inventory_products?.name || ri.product_id || '—')
+                        : (Array.isArray(ri.ingredients)
+                          ? (ri.ingredients[0]?.name || ri.ingredient_id)
+                          : (ri.ingredients?.name || ri.ingredient_id))}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <span className={`text-[11px] px-1.5 py-0.5 rounded font-medium ${ri.source === 'product' ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'}`}>
+                        {ri.source === 'product' ? 'Produkt' : 'Składnik'}
+                      </span>
                     </td>
                     <td className="px-4 py-2">
                       <Input

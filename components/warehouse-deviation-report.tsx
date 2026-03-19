@@ -80,7 +80,7 @@ export function WarehouseDeviationReport({
           deviationPct,
           valueZl: dev.deviation_value || 0,
           status,
-          type: deviation > 0 ? 'positive' : 'negative',
+          type: (deviation > 0 ? 'positive' : 'negative') as 'positive' | 'negative',
         }
       })
 
